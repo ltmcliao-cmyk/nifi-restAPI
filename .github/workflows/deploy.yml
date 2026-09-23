@@ -43,6 +43,7 @@ jobs:
       - name: 執行公司機拓撲部署
         env:
           NIFI_HOST: "http://localhost:8080"
+          PYTHONUTF8: "1"
         run: |
           echo "正在部署至 [公司機] NiFi..."
           python deploy.py
