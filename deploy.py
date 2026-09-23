@@ -104,22 +104,15 @@ def sync_parameter_context_and_bind(target_pg, context_name: str, parameters: di
 
     if existing_ctx:
         ctx_entity = existing_ctx[0]
+        # 取得完整的 Context 實體
         ctx_entity = nipyapi.parameters.get_parameter_context(ctx_entity.id, identifier_type="id")
         
-        # 關鍵修正：在實體頂層與 component 內同時填入 id，避免 400 錯誤
-        update_dto = nipyapi.nifi.ParameterContextDTO(
-            id=ctx_entity.id,
-            name=context_name,
-            parameters=param_dto_list
-        )
-        req_update_entity = nipyapi.nifi.ParameterContextEntity(
-            id=ctx_entity.id,
-            revision=ctx_entity.revision,
-            component=update_dto
-        )
+        # 🚨 關鍵修正：直接修改取得的實體內容，確保 Revision 和其他必要欄位完整不漏失
+        ctx_entity.component.parameters = param_dto_list
+        
         ctx_entity = nipyapi.nifi.ParameterContextsApi().update_parameter_context(
             ctx_entity.id,
-            req_update_entity
+            ctx_entity
         )
         print(f"🔄 更新 Parameter Context: [{context_name}]")
     else:
