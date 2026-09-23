@@ -5,36 +5,36 @@ on:
     branches:
       - main
       - dev
-  workflow_dispatch:[cite: 1]
+  workflow_dispatch:
 
 env:
-  ACTIONS_RUNNER_FORCED_NODE_VERSION: "node24"[cite: 1]
+  ACTIONS_RUNNER_FORCED_NODE_VERSION: "node24"
 
 jobs:
-  # 任務 1：本機測試部署（Push 到 dev 分支觸發）[cite: 1]
+  # 任務 1：本機測試部署（Push 到 dev 分支觸發）
   deploy-to-local:
-    if: github.ref == 'refs/heads/dev'[cite: 1]
-    runs-on: [self-hosted, local][cite: 1]
+    if: github.ref == 'refs/heads/dev'
+    runs-on: [self-hosted, local]
     steps:
       - name: 檢出儲存庫代碼
-        uses: actions/checkout@v4[cite: 1]
+        uses: actions/checkout@v4
 
       - name: 安裝相依套件
-        run: pip3 install --no-cache-dir nipyapi pyyaml[cite: 1]
+        run: pip3 install --no-cache-dir nipyapi pyyaml
 
       - name: 執行本機拓撲部署
         run: |
-          echo "正在部署至 [本機] NiFi..."[cite: 1]
-          export NIFI_HOST="http://nifi:8080"[cite: 1]
-          python3 deploy.py[cite: 1]
+          echo "正在部署至 [本機] NiFi..."
+          export NIFI_HOST="http://nifi:8080"
+          python3 deploy.py
 
-  # 任務 2：公司機主要部署（Push 到 main 分支觸發，對應 Windows 原生 Runner）[cite: 1]
+  # 任務 2：公司機主要部署（Push 到 main 分支觸發，對應 Windows 原生 Runner）
   deploy-to-company:
-    if: github.ref == 'refs/heads/main'[cite: 1]
-    runs-on: [self-hosted, company][cite: 1]
+    if: github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, company]
     steps:
       - name: 檢出儲存庫代碼
-        uses: actions/checkout@v4[cite: 1]
+        uses: actions/checkout@v4
 
       - name: 設定 Python 環境
         uses: actions/setup-python@v5
@@ -42,11 +42,11 @@ jobs:
           python-version: '3.8'
 
       - name: 安裝相依套件 (Windows)
-        run: pip install --no-cache-dir nipyapi pyyaml[cite: 1]
+        run: pip install --no-cache-dir nipyapi pyyaml
 
       - name: 執行公司機拓撲部署
         env:
-          NIFI_HOST: "http://localhost:8080"[cite: 1]
+          NIFI_HOST: "http://localhost:8080"
         run: |
-          echo "正在部署至 [公司機] NiFi..."[cite: 1]
+          echo "正在部署至 [公司機] NiFi..."
           python deploy.py
