@@ -107,12 +107,13 @@ def sync_parameter_context_and_bind(target_pg, context_name: str, parameters: di
         # 取得完整的 Context 實體
         ctx_entity = nipyapi.parameters.get_parameter_context(ctx_entity.id, identifier_type="id")
         
-        # 🚨 關鍵修正：直接修改取得的實體內容，確保 Revision 和其他必要欄位完整不漏失
+        # 🚨 關鍵修正 1：直接修改取得的實體內容，確保 Revision 完整
         ctx_entity.component.parameters = param_dto_list
         
+        # 🚨 關鍵修正 2：明確指定 id= 與 body= 具名參數，避開 nipyapi 參數順序錯亂的 Bug
         ctx_entity = nipyapi.nifi.ParameterContextsApi().update_parameter_context(
-            ctx_entity.id,
-            ctx_entity
+            id=ctx_entity.id,
+            body=ctx_entity
         )
         print(f"🔄 更新 Parameter Context: [{context_name}]")
     else:
