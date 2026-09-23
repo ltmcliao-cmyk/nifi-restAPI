@@ -37,7 +37,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: 安裝相依套件 (Windows)
-        run: pip install --no-cache-dir nipyapi pyyaml
+        run: python -m pip install --no-cache-dir nipyapi pyyaml
 
       - name: 執行公司機拓撲部署
         env:
