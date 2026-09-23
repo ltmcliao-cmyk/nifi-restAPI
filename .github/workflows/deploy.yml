@@ -5,21 +5,22 @@ on:
     branches:
       - main
       - dev
+  workflow_dispatch: # 保留手動觸發功能
 
 env:
-  ACTIONS_RUNNER_FORCED_NODE_VERSION: "node24" 
+  ACTIONS_RUNNER_FORCED_NODE_VERSION: "node24"[cite: 1]
 
 jobs:
-  # 任務 1：本機測試部署（當 Push 到 dev 分支時觸發）
+  # 任務 1：本機測試部署（當 Push 到 dev 分支時觸發，假設本機依然是 Linux/Container 系統）
   deploy-to-local:
-    if: github.ref == 'refs/heads/dev'
-    runs-on: [self-hosted, local]
+    if: github.ref == 'refs/heads/dev'[cite: 1]
+    runs-on: [self-hosted, local][cite: 1]
     steps:
       - name: 檢出儲存庫代碼
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4[cite: 1]
 
       - name: 安裝相依套件
-        run: pip3 install --no-cache-dir nipyapi pyyaml
+        run: pip3 install --no-cache-dir nipyapi pyyaml[cite: 1]
 
       - name: 執行本機拓撲部署
         run: |
@@ -27,19 +28,25 @@ jobs:
           export NIFI_HOST="http://nifi:8080"
           python3 deploy.py
 
-  # 任務 2：公司機主要部署（當 Push 到 main 分支時觸發）
+  # 任務 2：公司機主要部署（當 Push 到 main 分支時觸發，對應 Windows 原生 Runner）
   deploy-to-company:
-    if: github.ref == 'refs/heads/main'
-    runs-on: [self-hosted, company]
+    if: github.ref == 'refs/heads/main'[cite: 1]
+    runs-on: [self-hosted, company][cite: 1]
     steps:
       - name: 檢出儲存庫代碼
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4[cite: 1]
 
-      - name: 安裝相依套件
-        run: pip3 install --no-cache-dir nipyapi pyyaml
+      - name: 設定 Python 環境
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.8'
 
-      - name: 執行公司機拓撲部署
+      - name: 安裝相依套件 (Windows)
+        run: pip install --no-cache-dir nipyapi pyyaml[cite: 1]
+
+      - name: 執行公司機拓撲部署 (Windows 語法與網址修復)
+        env:
+          NIFI_HOST: "http://localhost:8080" # 改連 Host 模式下的 NiFi[cite: 1]
         run: |
-          echo "正在部署至 [公司機] NiFi..."
-          export NIFI_HOST="http://nifi:8080"
-          python3 deploy.py
+          echo "正在部署至 [公司機] NiFi..."[cite: 1]
+          python deploy.py
