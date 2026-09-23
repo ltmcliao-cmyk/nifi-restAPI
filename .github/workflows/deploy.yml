@@ -14,7 +14,7 @@ jobs:
   # 任務 1：本機測試部署（Push 到 dev 分支觸發 -> 派給 Linux/Mac 本機 Runner）
   deploy-to-local:
     if: github.ref == 'refs/heads/dev'
-    runs-on: [self-hosted, Linux]  # <-- 指定給 Linux 本機 Runner (若是 Mac 改寫 macOS)
+    runs-on: [self-hosted, Linux] 
     steps:
       - name: 檢出儲存庫代碼
         uses: actions/checkout@v4
@@ -28,18 +28,13 @@ jobs:
           export NIFI_HOST="http://nifi:8080"
           python3 deploy.py
 
-  # 任務 2：公司機主要部署（Push 到 main 分支觸發 -> 派給 Windows 公司機 Runner）
+  # 任務 2：公司機主要部署（Push 到 main 分支觸發 -> 派給 Windows 本機 Runner）
   deploy-to-company:
     if: github.ref == 'refs/heads/main'
-    runs-on: [self-hosted, Windows] # <-- 改用 Windows 標籤，公司機 Runner 立刻接單！
+    runs-on: [self-hosted, Windows]
     steps:
       - name: 檢出儲存庫代碼
         uses: actions/checkout@v4
-
-      - name: 設定 Python 環境
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.8'
 
       - name: 安裝相依套件 (Windows)
         run: pip install --no-cache-dir nipyapi pyyaml
