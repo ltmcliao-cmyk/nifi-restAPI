@@ -1,0 +1,30 @@
+# 定義Github Actions Workflow的名稱
+name: Continuous Pipeline Deployment
+
+# git push到main分支時，執行以下任務
+on:
+  push:
+    branches:
+      - main 
+     # - dev
+
+env:
+  ACTIONS_RUNNER_FORCED_NODE_VERSION: "node24" 
+
+jobs:
+  deploy-to-nifi:
+    runs-on: self-hosted 
+
+    steps:
+      - name: 檢出儲存庫代碼
+        uses: actions/checkout@v4
+
+      - name: 安裝相依套件
+        run: |
+          pip3 install --no-cache-dir nipyapi pyyaml
+
+      - name: 執行拓撲部署
+        run: |
+          export NIFI_HOST="http://nifi:8080"
+          python3 deploy.py
+      

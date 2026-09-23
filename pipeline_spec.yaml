@@ -1,0 +1,58 @@
+# ==============================================================================
+# Pipeline Specification (NiFi Declarative Topology)
+# ==============================================================================
+version: "1.0"
+pipeline_name: "Test_Mock_Pipeline"
+description: "模擬資料生成與日誌記錄管線 (支援 A/B 效能與整合測試)"
+
+# ------------------------------------------------------------------------------
+# 1. 參數上下文 (Parameter Context): 讓環境變數 / 敏感密鑰與流程邏輯解耦
+# ------------------------------------------------------------------------------
+parameters:
+  STATION_ID: "TEST_001"
+  SCHEDULE_INTERVAL: "5 sec"
+  LOG_LEVEL: "info"
+
+# ------------------------------------------------------------------------------
+# 2. 節點定義 (Processors)
+# ------------------------------------------------------------------------------
+processors:
+  - name: "Generate_Mock_Data"
+    type: "org.apache.nifi.processors.standard.GenerateFlowFile"
+    # 調度策略抽離（不與業務屬性混雜）
+    scheduling:
+      strategy: "TIMER_DRIVEN"
+      period: "#{SCHEDULE_INTERVAL}"
+      execution_node: "ALL"
+      concurrent_tasks: 1
+    # 業務屬性 (可引用 Parameter Context: #{VAR})
+    properties:
+      Custom Text: '{"station_id": "#{STATION_ID}", "bikes": 12, "status": "OK"}'
+      Unique FlowFiles: "false"
+      Data Format: "Text"
+
+  - name: "Log_Payload"
+    type: "org.apache.nifi.processors.standard.LogAttribute"
+    scheduling:
+      strategy: "TIMER_DRIVEN"
+      period: "0 sec"
+      concurrent_tasks: 1
+    properties:
+      Log Level: "#{LOG_LEVEL}"
+      Log Payload: "true"
+      attributes-to-log-regex: ".*"
+
+# ------------------------------------------------------------------------------
+# 3. 連線定義 (Connections): 明確定義佇列與背壓
+# ------------------------------------------------------------------------------
+connections:
+  - name: "Mock_to_Log"
+    source: "Generate_Mock_Data"
+    destination: "Log_Payload"
+    relationships:
+      - "success"
+    # 連線調優配置（可選擴充）
+    flow_control:
+      back_pressure_count: 10000        # 超過 10000 筆 FlowFile 自動暫停上游
+      back_pressure_size: "1 GB"
+      load_balance_strategy: "DO_NOT_LOAD_BALANCE"
