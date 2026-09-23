@@ -137,7 +137,6 @@ def sync_parameter_context_and_bind(target_pg, context_name: str, parameters: di
             )
         )
         
-        # 🚨 使用具名參數 id= 與 body=，避開 update_process_group 的參數順序 Bug
         nipyapi.nifi.ProcessGroupsApi().update_process_group(
             id=target_pg.id,
             body=target_pg
@@ -208,12 +207,15 @@ def sync_single_connection(
         )
         fc = conn_spec.get("flow_control", {})
         if fc:
-            conn_config = nipyapi.nifi.ConnectionDTO(
-                back_pressure_object_threshold=fc.get("back_pressure_count", 10000),
-                back_pressure_data_size_threshold=fc.get("back_pressure_size", "1 GB"),
-                load_balance_strategy=fc.get("load_balance_strategy", "DO_NOT_LOAD_BALANCE")
+            # 🚨 修改這裡：直接調整現有連線屬性，避免覆蓋 Source 和 Destination
+            conn.component.back_pressure_object_threshold = fc.get("back_pressure_count", 10000)
+            conn.component.back_pressure_data_size_threshold = fc.get("back_pressure_size", "1 GB")
+            conn.component.load_balance_strategy = fc.get("load_balance_strategy", "DO_NOT_LOAD_BALANCE")
+            
+            nipyapi.nifi.ConnectionsApi().update_connection(
+                id=conn.id,
+                body=conn
             )
-            nipyapi.canvas.update_connection(conn, conn_config)
 
 # =====================================================================
 # 階段 3: 線性編排器 (含度量與 Context 綁定)
