@@ -104,13 +104,10 @@ def sync_parameter_context_and_bind(target_pg, context_name: str, parameters: di
 
     if existing_ctx:
         ctx_entity = existing_ctx[0]
-        # 取得完整的 Context 實體
         ctx_entity = nipyapi.parameters.get_parameter_context(ctx_entity.id, identifier_type="id")
         
-        # 🚨 關鍵修正 1：直接修改取得的實體內容，確保 Revision 完整
         ctx_entity.component.parameters = param_dto_list
         
-        # 🚨 關鍵修正 2：明確指定 id= 與 body= 具名參數，避開 nipyapi 參數順序錯亂的 Bug
         ctx_entity = nipyapi.nifi.ParameterContextsApi().update_parameter_context(
             id=ctx_entity.id,
             body=ctx_entity
@@ -132,22 +129,19 @@ def sync_parameter_context_and_bind(target_pg, context_name: str, parameters: di
     current_bound = target_pg.component.parameter_context
 
     if not current_bound or current_bound.id != ctx_entity.id:
-        update_pg_entity = nipyapi.nifi.ProcessGroupEntity(
-            id=target_pg.id,
-            revision=target_pg.revision,
-            component=nipyapi.nifi.ProcessGroupDTO(
-                id=target_pg.id,
-                parameter_context=nipyapi.nifi.ParameterContextReferenceEntity(
-                    id=ctx_entity.id,
-                    permissions=nipyapi.nifi.PermissionsDTO(can_read=True, can_write=True),
-                    component=nipyapi.nifi.ParameterContextReferenceDTO(
-                        id=ctx_entity.id,
-                        name=context_name
-                    )
-                )
+        target_pg.component.parameter_context = nipyapi.nifi.ParameterContextReferenceEntity(
+            id=ctx_entity.id,
+            component=nipyapi.nifi.ParameterContextReferenceDTO(
+                id=ctx_entity.id,
+                name=context_name
             )
         )
-        nipyapi.nifi.ProcessGroupsApi().update_process_group(target_pg.id, update_pg_entity)
+        
+        # 🚨 使用具名參數 id= 與 body=，避開 update_process_group 的參數順序 Bug
+        nipyapi.nifi.ProcessGroupsApi().update_process_group(
+            id=target_pg.id,
+            body=target_pg
+        )
         print(f"🔗 Process Group [{target_pg.component.name}] 已成功綁定 Context [{context_name}]！")
 
     return ctx_entity
