@@ -41,19 +41,21 @@ jobs:
               sys.stdout.reconfigure(encoding='utf-8')
 
           # -------------------------------------------------------------
-          # 1. 繞過公司內網 SSL 封包解密檢驗
+          # 0. 鎖定專案落地根目錄 (對齊 compose.yaml 所在專案)
           # -------------------------------------------------------------
+          BASE_DIR = r"C:\Users\lutomica\Desktop\Dana mission\data"
+          os.makedirs(BASE_DIR, exist_ok=True)
+          token_cache_path = os.path.join(BASE_DIR, "token_cache.json")
+
+          # 略過公司內網 SSL 封包解密檢驗
           ssl_ctx = ssl._create_unverified_context()
 
           client_id = "ltmc.liao-89a1f100-a9ac-47ab"
           client_secret = "13a86ee7-314e-47a8-ac77-ffeb2f5660bd"
           force_station = "${{ github.event.inputs.force_station }}" == "true"
 
-          os.makedirs("data", exist_ok=True)
-          token_cache_path = os.path.join("data", "token_cache.json")
-
           # -------------------------------------------------------------
-          # 2. Token 快取機制 (24 小時只換發一次)
+          # 1. Token 快取機制 (24 小時只換發一次)
           # -------------------------------------------------------------
           token = None
           now_ts = time.time()
@@ -95,10 +97,10 @@ jobs:
                           "expires_at": now_ts + expires_in,
                           "updated_at": datetime.datetime.now().isoformat()
                       }, f, indent=2)
-                  print("  -> 全新 Token 申請成功並已寫入本地快取。")
+                  print(f"  -> 全新 Token 申請成功並存入: {token_cache_path}")
 
           # -------------------------------------------------------------
-          # 3. 台北時間 (UTC+8) 計算與落地寫入
+          # 2. 台北時間 (UTC+8) 計算與落地寫入
           # -------------------------------------------------------------
           now_utc8 = datetime.datetime.now(datetime.timezone.utc).astimezone(datetime.timezone(datetime.timedelta(hours=8)))
           date_str = now_utc8.strftime("%Y-%m-%d")
@@ -126,7 +128,7 @@ jobs:
                   else:
                       raw_data = compressed_data
 
-              target_dir = os.path.join("data", "raw", category, date_str)
+              target_dir = os.path.join(BASE_DIR, "raw", category, date_str)
               os.makedirs(target_dir, exist_ok=True)
               file_path = os.path.join(target_dir, f"{filename_prefix}_{time_str}.json")
 
@@ -139,13 +141,13 @@ jobs:
               print(f"       筆數: {records_count} 筆 | 落盤大小: {file_size_kb:.2f} KB")
 
           # -------------------------------------------------------------
-          # 4. 執行抓取任務 (車位每 5 分鐘；站位當日唯一)
+          # 3. 執行抓取任務 (車位每 5 分鐘；站位當日唯一)
           # -------------------------------------------------------------
           print("[2/3] 處理動態即時車位 (Availability)...")
           fetch_and_write("availability", "https://tdx.transportdata.tw/api/basic/v2/Bike/Availability/City/Taipei?%24format=JSON", "availability")
 
           print("[3/3] 處理靜態站位資料 (Station)...")
-          station_today_dir = os.path.join("data", "raw", "station", date_str)
+          station_today_dir = os.path.join(BASE_DIR, "raw", "station", date_str)
           existing_station_files = glob.glob(os.path.join(station_today_dir, "*.json"))
 
           if existing_station_files and not force_station:
