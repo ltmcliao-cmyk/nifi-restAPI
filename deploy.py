@@ -18,6 +18,40 @@ nipyapi.config.nifi_config.host = f"{NIFI_BASE_URL}/nifi-api"
 
 logger = logging.getLogger("nifi_pipeline")
 
+
+def resolve_processor_type(type_identifier: str):
+    """
+    精確解析 NiFi Processor 類型，確保回傳單一 DocumentedTypeDTO 物件
+    支援全類別名 (FQCN) 或短名稱 (e.g. GenerateFlowFile)
+    """
+    # 1. 嘗試直接比對
+    proc_type = nipyapi.canvas.get_processor_type(type_identifier)
+    
+    # 2. 若傳入的是 FQCN (含點號)，嘗試用最後的類別短名搜尋
+    if not proc_type and "." in type_identifier:
+        short_name = type_identifier.split(".")[-1]
+        proc_type = nipyapi.canvas.get_processor_type(short_name)
+
+    # 3. 若找不到，列出所有型別以全名比對
+    if not proc_type:
+        all_types = nipyapi.canvas.list_all_processor_types()
+        for t in all_types:
+            if t.type == type_identifier:
+                proc_type = t
+                break
+
+    # 4. 若回傳為清單，預設取第一項 (通常是最新 bundle 版本)
+    if isinstance(proc_type, list):
+        proc_type = proc_type[0] if proc_type else None
+
+    if not proc_type or not isinstance(proc_type, nipyapi.nifi.DocumentedTypeDTO):
+        raise ValueError(
+            f"無法在目標 NiFi (位址: {nipyapi.config.nifi_config.host}) 找到 Processor 類型: '{type_identifier}'。"
+            f"請確認 NiFi 版本與 NAR 套件是否安裝正常。"
+        )
+    return proc_type
+
+
 # =====================================================================
 # 階段 1: 規格解析與圖論排版 (純函數, CPU-bound)
 # =====================================================================
@@ -28,8 +62,12 @@ def analyze_spec(spec: dict) -> dict:
 
     used_rels: dict[str, set[str]] = defaultdict(set)
     for c in conn_specs:
-        for r in c.get("relationships", []):
-            used_rels[c["source"]].add(r)
+        src = c.get("source") or c.get("from")
+        # 兼容單數 relationship 與複數 relationships
+        rels = c.get("relationships") or ([c["relationship"]] if "relationship" in c else [])
+        for r in rels:
+            if src:
+                used_rels[src].add(r)
 
     return {
         "pipeline_name": spec.get("pipeline_name", "Untitled_Pipeline"),
@@ -43,8 +81,12 @@ def calculate_auto_layout(processors: list[dict], connections: list[dict]) -> di
     in_degree = {p["name"]: 0 for p in processors}
     adjacency: dict[str, list[str]] = defaultdict(list)
     for c in connections:
-        adjacency[c["source"]].append(c["destination"])
-        in_degree[c["destination"]] = in_degree.get(c["destination"], 0) + 1
+        src = c.get("source") or c.get("from")
+        dst = c.get("destination") or c.get("to")
+        if not src or not dst:
+            raise KeyError(f"連線配置缺少 source 或 destination: {c}")
+        adjacency[src].append(dst)
+        in_degree[dst] = in_degree.get(dst, 0) + 1
 
     queue = deque([name for name, deg in in_degree.items() if deg == 0])
     levels: dict[str, int] = {}
@@ -167,14 +209,16 @@ def sync_single_processor(
             nipyapi.canvas.schedule_processor(proc_entity, scheduled=False, refresh=True)
             proc_entity = nipyapi.canvas.get_processor(proc_entity.id, identifier_type="id")
     else:
-        proc_type = nipyapi.canvas.get_processor_type(proc_spec["type"])
+        # 呼叫解析函式，取得 DocumentedTypeDTO
+        proc_type = resolve_processor_type(proc_spec["type"])
         proc_entity = nipyapi.canvas.create_processor(target_pg, proc_type, position, name=name)
 
     all_relationships = {r.name for r in proc_entity.component.relationships}
     unused = list(all_relationships - used_relationships)
 
+    # 兼容頂層 scheduling_period 或內嵌 scheduling.period
     sched = proc_spec.get("scheduling", {})
-    raw_period = sched.get("period", "0 sec")
+    raw_period = proc_spec.get("scheduling_period") or sched.get("period", "0 sec")
     resolved_period = interpolate_value(raw_period, parameters)
 
     config = nipyapi.nifi.ProcessorConfigDTO(
@@ -192,10 +236,19 @@ def sync_single_connection(
     active_processors: dict[str, Any],
     existing_connections: list[Any],
 ) -> None:
-    source = active_processors.get(conn_spec["source"])
-    destination = active_processors.get(conn_spec["destination"])
+    src_name = conn_spec.get("source") or conn_spec.get("from")
+    dst_name = conn_spec.get("destination") or conn_spec.get("to")
+    source = active_processors.get(src_name)
+    destination = active_processors.get(dst_name)
     if source is None or destination is None:
         return
+
+    # 兼容單數 relationship 與複數 relationships
+    relationships = conn_spec.get("relationships")
+    if not relationships and "relationship" in conn_spec:
+        relationships = [conn_spec["relationship"]]
+    if not relationships:
+        relationships = []
 
     already_connected = any(
         c.component.source.id == source.id and c.component.destination.id == destination.id
@@ -203,15 +256,32 @@ def sync_single_connection(
     )
     if not already_connected:
         conn = nipyapi.canvas.create_connection(
-            source, destination, relationships=conn_spec.get("relationships", [])
+            source, destination, relationships=relationships
         )
+        
+        # 讀取 flow_control 或連線屬性中的 backpressure 設定
         fc = conn_spec.get("flow_control", {})
-        if fc:
-            # 🚨 修改這裡：直接調整現有連線屬性，避免覆蓋 Source 和 Destination
-            conn.component.back_pressure_object_threshold = fc.get("back_pressure_count", 10000)
-            conn.component.back_pressure_data_size_threshold = fc.get("back_pressure_size", "1 GB")
-            conn.component.load_balance_strategy = fc.get("load_balance_strategy", "DO_NOT_LOAD_BALANCE")
-            
+        bp_obj = (
+            conn_spec.get("backpressure_object_threshold")
+            or fc.get("back_pressure_count")
+        )
+        bp_data = (
+            conn_spec.get("backpressure_data_threshold")
+            or fc.get("back_pressure_size")
+        )
+
+        needs_update = False
+        if bp_obj is not None:
+            conn.component.back_pressure_object_threshold = bp_obj
+            needs_update = True
+        if bp_data is not None:
+            conn.component.back_pressure_data_size_threshold = bp_data
+            needs_update = True
+        if fc.get("load_balance_strategy"):
+            conn.component.load_balance_strategy = fc["load_balance_strategy"]
+            needs_update = True
+
+        if needs_update:
             nipyapi.nifi.ConnectionsApi().update_connection(
                 id=conn.id,
                 body=conn

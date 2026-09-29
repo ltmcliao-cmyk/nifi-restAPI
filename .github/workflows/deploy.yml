@@ -23,27 +23,33 @@ jobs:
         run: pip3 install --no-cache-dir nipyapi pyyaml
 
       - name: 執行本機拓撲部署
+        env:
+          NIFI_HOST: "http://nifi:8080"
+          PYTHONIOENCODING: "utf-8"
         run: |
           echo "正在部署至 [本機] NiFi..."
-          export NIFI_HOST="http://nifi:8080"
           python3 deploy.py
 
   # 任務 2：公司機主要部署（Push 到 main 分支觸發 -> 派給 Windows 本機 Runner）
   deploy-to-company:
     if: github.ref == 'refs/heads/main'
     runs-on: [self-hosted, Windows]
+    defaults:
+      run:
+        shell: powershell
     steps:
       - name: 檢出儲存庫代碼
         uses: actions/checkout@v4
 
       - name: 安裝相依套件 (Windows)
-        # 這裡改回用系統預設的 python 來執行 pip 安裝
         run: python -m pip install --no-cache-dir nipyapi pyyaml
 
       - name: 執行公司機拓撲部署
         env:
           NIFI_HOST: "http://localhost:8080"
           PYTHONUTF8: "1"
+          PYTHONIOENCODING: "utf-8"
         run: |
-          echo "正在部署至 [公司機] NiFi..."
+          $OutputEncoding = [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+          Write-Output "正在部署至 [公司機] NiFi..."
           python deploy.py
