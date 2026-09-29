@@ -20,7 +20,7 @@ logger = logging.getLogger("nifi_pipeline")
 
 
 def resolve_processor_type(type_identifier: str):
-    """精確解析 NiFi Processor 類型"""
+    """精確解析 NiFi Processor 類型，回傳 DocumentedTypeDTO"""
     proc_type = nipyapi.canvas.get_processor_type(type_identifier)
     if not proc_type and "." in type_identifier:
         short_name = type_identifier.split(".")[-1]
@@ -37,30 +37,32 @@ def resolve_processor_type(type_identifier: str):
         proc_type = proc_type[0] if proc_type else None
 
     if not proc_type or not isinstance(proc_type, nipyapi.nifi.DocumentedTypeDTO):
-        raise ValueError(f"無法在 NiFi 找到 Processor 類型: '{type_identifier}'")
+        raise ValueError(
+            f"無法在目標 NiFi 找到 Processor 類型: '{type_identifier}'。"
+            f"請檢查類別名稱或 NAR 是否已正確掛載。"
+        )
     return proc_type
 
 
 def resolve_controller_service_type(type_identifier: str):
-    """精確解析 NiFi Controller Service 類型"""
-    cs_type = nipyapi.canvas.get_controller_service_type(type_identifier)
-    if not cs_type and "." in type_identifier:
-        short_name = type_identifier.split(".")[-1]
-        cs_type = nipyapi.canvas.get_controller_service_type(short_name)
+    """精確解析 NiFi Controller Service 類型，回傳 DocumentedTypeDTO"""
+    all_types = nipyapi.canvas.list_all_controller_types()
+    
+    # 1. 優先以 FQCN 完整類別路徑比對
+    for t in all_types:
+        if t.type == type_identifier:
+            return t
 
-    if not cs_type:
-        all_types = nipyapi.canvas.list_all_controller_service_types()
-        for t in all_types:
-            if t.type == type_identifier:
-                cs_type = t
-                break
+    # 2. 次之以類別短名比對 (例如 DBCPConnectionPool)
+    short_name = type_identifier.split(".")[-1]
+    for t in all_types:
+        if t.type.endswith(f".{short_name}") or t.type == short_name:
+            return t
 
-    if isinstance(cs_type, list):
-        cs_type = cs_type[0] if cs_type else None
-
-    if not cs_type or not isinstance(cs_type, nipyapi.nifi.DocumentedTypeDTO):
-        raise ValueError(f"無法在 NiFi 找到 Controller Service 類型: '{type_identifier}'")
-    return cs_type
+    raise ValueError(
+        f"無法在目標 NiFi 找到 Controller Service 類型: '{type_identifier}'。"
+        f"請確認該服務類型是否支援。"
+    )
 
 
 # =====================================================================
@@ -179,7 +181,6 @@ def sync_parameter_context_and_bind(target_pg, context_name: str, parameters: di
         ctx_entity = nipyapi.nifi.ParameterContextsApi().create_parameter_context(req_entity)
         print(f"✅ 成功建立 Parameter Context: [{context_name}] (ID: {ctx_entity.id})")
 
-    # 綁定至目標 Process Group
     target_pg = nipyapi.canvas.get_process_group(target_pg.id, identifier_type="id")
     current_bound = target_pg.component.parameter_context
 
@@ -201,66 +202,84 @@ def sync_parameter_context_and_bind(target_pg, context_name: str, parameters: di
 
 
 def sync_controller_services(target_pg, cs_specs: list[dict]) -> dict[str, str]:
-    """建立並更新 Controller Services，並回傳 {名稱: Service_ID} 對應字典"""
+    """建立並更新 Controller Services，回傳 {Service_Name: Service_UUID} 映射字典"""
     if not cs_specs:
         return {}
 
+    cs_api = nipyapi.nifi.ControllerServicesApi()
+    pg_api = nipyapi.nifi.ProcessGroupsApi()
+
+    # 取得當前 Process Group 下已存在的 Controller Services
+    existing_resp = pg_api.get_controller_services_from_group(target_pg.id)
     existing_cs = {
-        cs.component.name: cs
-        for cs in (nipyapi.canvas.list_all_controller_services(target_pg.id) or [])
+        cs.component.name: cs for cs in (existing_resp.controller_services or [])
     }
 
     cs_id_map: dict[str, str] = {}
     created_or_updated: list[Any] = []
 
-    # 第一階段：先確保所有 Controller Services 建立完成
+    # 1. 建立或取得所有 Controller Services 的實體與 ID
     for cs_spec in cs_specs:
         name = cs_spec["name"]
         if name in existing_cs:
             cs_entity = existing_cs[name]
         else:
             cs_type = resolve_controller_service_type(cs_spec["type"])
-            cs_entity = nipyapi.canvas.create_controller_service(target_pg, cs_type, name=name)
+            req_body = nipyapi.nifi.ControllerServiceEntity(
+                revision=nipyapi.nifi.RevisionDTO(version=0),
+                component=nipyapi.nifi.ControllerServiceDTO(
+                    name=name,
+                    type=cs_type.type,
+                    bundle=cs_type.bundle
+                )
+            )
+            cs_entity = pg_api.create_controller_service(target_pg.id, req_body)
         cs_id_map[name] = cs_entity.id
 
-    # 第二階段：置換相互參照的 ID、更新屬性並啟動
+    # 2. 替換相依 Service 名稱並更新配置
     for cs_spec in cs_specs:
         name = cs_spec["name"]
         cs_id = cs_id_map[name]
-        cs_entity = nipyapi.canvas.get_controller_service(cs_id, identifier_type="id")
+        cs_entity = cs_api.get_controller_service(cs_id)
 
-        # 替換屬性中的 Controller Service 名稱為其對應的 UUID
+        # 將屬性中參照其他 Controller Service 的名稱換成實體 UUID
         raw_props = cs_spec.get("properties", {})
         resolved_props = {
             k: cs_id_map.get(str(v), str(v))
             for k, v in raw_props.items()
         }
 
-        # 先停止以允許更新屬性
+        # 若已啟用則先停用以允許修改配置
         if cs_entity.component.state == "ENABLED":
-            nipyapi.canvas.schedule_controller_service(cs_entity, scheduled=False, refresh=True)
-            cs_entity = nipyapi.canvas.get_controller_service(cs_id, identifier_type="id")
+            try:
+                run_status_body = nipyapi.nifi.ControllerServiceRunStatusEntity(
+                    revision=cs_entity.revision,
+                    state="DISABLED"
+                )
+                cs_entity = cs_api.update_run_status(cs_id, run_status_body)
+            except Exception:
+                pass
 
-        cs_entity = nipyapi.canvas.update_variable_registry(
-            cs_entity,
-            update=resolved_props
-        ) if hasattr(nipyapi.canvas, "update_controller_service_properties") else nipyapi.canvas.get_controller_service(cs_id, identifier_type="id")
-        
-        # 使用 REST API 直接更新配置
+        # 寫入最新配置
+        cs_entity = cs_api.get_controller_service(cs_id)
         cs_entity.component.properties = resolved_props
-        cs_entity = nipyapi.nifi.ControllerServicesApi().update_controller_service(
-            id=cs_entity.id,
-            body=cs_entity
-        )
+        cs_entity = cs_api.update_controller_service(id=cs_id, body=cs_entity)
         created_or_updated.append(cs_entity)
         print(f"⚙️ Controller Service [{name}] 配置完成 (ID: {cs_id})")
 
-    # 第三階段：啟用所有 Controller Services
+    # 3. 啟用所有 Controller Services
     for cs_entity in created_or_updated:
         try:
-            nipyapi.canvas.schedule_controller_service(cs_entity, scheduled=True, refresh=True)
+            curr = cs_api.get_controller_service(cs_entity.id)
+            if curr.component.state != "ENABLED":
+                run_status_body = nipyapi.nifi.ControllerServiceRunStatusEntity(
+                    revision=curr.revision,
+                    state="ENABLED"
+                )
+                cs_api.update_run_status(curr.id, run_status_body)
+            print(f"▶️ Controller Service [{cs_entity.component.name}] 已啟用")
         except Exception as e:
-            logger.warning(f"啟用 Controller Service [{cs_entity.component.name}] 時略過或等待完成: {e}")
+            logger.warning(f"啟用 Controller Service [{cs_entity.component.name}] 時略過: {e}")
 
     return cs_id_map
 
@@ -299,7 +318,7 @@ def sync_single_processor(
     raw_period = proc_spec.get("scheduling_period") or sched.get("period", "0 sec")
     resolved_period = interpolate_value(raw_period, parameters)
 
-    # 關鍵修正：將 Processor 屬性中的 Controller Service 名稱轉換為 UUID
+    # 將屬性中所有 Controller Service 名稱轉換為對應 UUID
     raw_props = proc_spec.get("properties", {})
     resolved_props = {}
     for k, v in raw_props.items():
@@ -449,6 +468,7 @@ def run_deployment_pipeline(spec: dict, max_workers: int = 5, auto_start: bool =
         "connections_count": len(parsed["connections"]),
         "metrics": metrics,
     }
+
 
 if __name__ == "__main__":
     with open("pipeline_spec.yaml", "r", encoding="utf-8") as f:
