@@ -19,6 +19,7 @@ jobs:
           NIFI_HOST: 'http://localhost:8080/nifi-api'
           TARGET_NAME: ${{ github.event.inputs.target_group_name }}
           GITHUB_STEP_SUMMARY: ${{ env.GITHUB_STEP_SUMMARY }}
+          PYTHONIOENCODING: 'utf-8'
         run: |
           import json
           import os
@@ -28,7 +29,36 @@ jobs:
           import urllib.request
 
           # ---------------------------------------------------------
-          # 基礎 HTTP 輔助函式 (純標準函式庫，支援 Windows Runner)
+          # 解決 Windows Runner 終端輸出亂碼
+          # ---------------------------------------------------------
+          if sys.platform.startswith("win"):
+              try:
+                  sys.stdout.reconfigure(encoding="utf-8")
+                  sys.stderr.reconfigure(encoding="utf-8")
+              except AttributeError:
+                  pass
+
+          # ---------------------------------------------------------
+          # 數值安全轉型輔助函式 (防禦 NiFi API 回傳字串型態數字)
+          # ---------------------------------------------------------
+          def to_int(val, default=0):
+              if val is None:
+                  return default
+              if isinstance(val, int):
+                  return val
+              if isinstance(val, str):
+                  clean = val.replace(",", "").strip()
+                  try:
+                      return int(clean)
+                  except ValueError:
+                      try:
+                          return int(float(clean))
+                      except ValueError:
+                          return default
+              return default
+
+          # ---------------------------------------------------------
+          # 基礎 HTTP 輔助函式 (純標準函式庫)
           # ---------------------------------------------------------
           def api_request(url, method="GET", data=None):
               headers = {"Content-Type": "application/json", "Accept": "application/json"}
@@ -99,7 +129,7 @@ jobs:
           conn_statuses = {c.get("id"): c for c in status_snapshots.get("connectionStatusSnapshots", [])}
 
           # ---------------------------------------------------------
-          # 步驟 3: 提取 Processor (去視覺雜訊、保留全量屬性與驗證錯誤)
+          # 步驟 3: 提取 Processor
           # ---------------------------------------------------------
           component_ids = set()
           processors_clean = []
@@ -110,6 +140,12 @@ jobs:
               component_ids.add(p_id)
               comp = p.get("component", {})
               p_stat = proc_statuses.get(p_id, {}).get("processorStatusSnapshot", {})
+
+              active_threads = to_int(p_stat.get("activeThreadCount"))
+              files_queued = to_int(p_stat.get("flowFilesQueued"))
+              bytes_queued = to_int(p_stat.get("bytesQueued"))
+              bytes_read = to_int(p_stat.get("bytesRead"))
+              bytes_written = to_int(p_stat.get("bytesWritten"))
 
               proc_info = {
                   "id": p_id,
@@ -123,16 +159,15 @@ jobs:
                   "schedulingPeriod": comp.get("config", {}).get("schedulingPeriod"),
                   "autoTerminatedRelationships": comp.get("config", {}).get("autoTerminatedRelationships", []),
                   "metrics": {
-                      "activeThreadCount": p_stat.get("activeThreadCount", 0),
-                      "flowFilesQueued": p_stat.get("flowFilesQueued", 0),
-                      "bytesQueued": p_stat.get("bytesQueued", 0),
-                      "bytesRead": p_stat.get("bytesRead", 0),
-                      "bytesWritten": p_stat.get("bytesWritten", 0)
+                      "activeThreadCount": active_threads,
+                      "flowFilesQueued": files_queued,
+                      "bytesQueued": bytes_queued,
+                      "bytesRead": bytes_read,
+                      "bytesWritten": bytes_written
                   }
               }
               processors_clean.append(proc_info)
 
-              # 標記異常節點
               if proc_info["validationErrors"] or proc_info["runStatus"] in ["Stopped", "Invalid", "Disabled"]:
                   invalid_or_stopped.append({
                       "name": proc_info["name"],
@@ -142,7 +177,7 @@ jobs:
                   })
 
           # ---------------------------------------------------------
-          # 步驟 4: 提取 Connection (流向、背壓與塞車判斷)
+          # 步驟 4: 提取 Connection (安全型態轉換)
           # ---------------------------------------------------------
           connections_clean = []
           congested_connections = []
@@ -153,9 +188,9 @@ jobs:
               comp = c.get("component", {})
               c_stat = conn_statuses.get(c_id, {}).get("connectionStatusSnapshot", {})
 
-              queued_count = c_stat.get("queuedCount", 0)
-              queued_bytes = c_stat.get("queuedBytes", 0)
-              threshold_obj = comp.get("backPressureObjectThreshold", 10000)
+              queued_count = to_int(c_stat.get("queuedCount"))
+              queued_bytes = to_int(c_stat.get("queuedBytes"))
+              threshold_obj = to_int(comp.get("backPressureObjectThreshold"), default=10000)
 
               conn_info = {
                   "id": c_id,
@@ -174,7 +209,7 @@ jobs:
                   congested_connections.append(conn_info)
 
           # ---------------------------------------------------------
-          # 步驟 5: 抓取 Bulletin Board (端點 3，過濾本 Group 之 WARNING/ERROR)
+          # 步驟 5: 抓取 Bulletin Board (端點 3)
           # ---------------------------------------------------------
           bulletins_raw = api_request(f"{nifi_host}/flow/bulletin-board")
           bulletin_errors = []
@@ -186,7 +221,6 @@ jobs:
                   source_id = b_data.get("sourceId")
                   level = b_data.get("level")
 
-                  # 只抓取與此 Group 組件相關，且等級為 WARNING 或 ERROR 的紀錄
                   if (source_id in component_ids or b_data.get("groupId") == target_id) and level in ["WARNING", "ERROR"]:
                       bulletin_errors.append({
                           "timestamp": b_data.get("timestamp"),
@@ -198,26 +232,24 @@ jobs:
                       })
 
           # ---------------------------------------------------------
-          # 步驟 6: 佇列滯留資料採樣 (端點 4，僅針對 congested 佇列抽樣 3 筆)
+          # 步驟 6: 佇列滯留資料採樣 (端點 4)
           # ---------------------------------------------------------
           stuck_samples = []
           for cc in congested_connections:
               c_id = cc["id"]
-              # 發起 listing 請求
               listing_post = api_request(f"{nifi_host}/flowfile-queues/{c_id}/listing-requests", method="POST")
               if listing_post and "listingRequest" in listing_post:
                   req_id = listing_post["listingRequest"]["id"]
-                  time.sleep(0.5)  # 等待佇列快照完成
+                  time.sleep(0.5)
 
                   listing_res = api_request(f"{nifi_host}/flowfile-queues/{c_id}/listing-requests/{req_id}")
-                  # 清除 request
                   api_request(f"{nifi_host}/flowfile-queues/{c_id}/listing-requests/{req_id}", method="DELETE")
 
                   if listing_res and "listingRequest" in listing_res:
                       summaries = listing_res["listingRequest"].get("flowFileSummaries", [])[:3]
                       sampled_files = [{
                           "uuid": f.get("uuid"),
-                          "size": f.get("size"),
+                          "size": to_int(f.get("size")),
                           "queuedDuration": f.get("queuedDuration"),
                           "attributes": f.get("attributes", {})
                       } for f in summaries]
@@ -230,7 +262,7 @@ jobs:
                       })
 
           # ---------------------------------------------------------
-          # 步驟 7: 萃取 Controller Services (DBCP 連線池、快取服務等狀態)
+          # 步驟 7: 萃取 Controller Services
           # ---------------------------------------------------------
           controller_services_clean = []
           if cs_data:
@@ -269,14 +301,13 @@ jobs:
               "connectionsTopology": connections_clean
           }
 
-          # 寫入本機檔案
           output_filename = "nifi_diagnostic_dump.json"
           with open(output_filename, "w", encoding="utf-8") as f:
               json.dump(diagnostic_dump, f, indent=2, ensure_ascii=False)
           print(f"已產出完整診斷檔案: {output_filename}")
 
           # ---------------------------------------------------------
-          # 步驟 9: 輸出至 GitHub Actions Summary (供一鍵複製)
+          # 步驟 9: 輸出至 GitHub Actions Summary
           # ---------------------------------------------------------
           if summary_file:
               dump_json_str = json.dumps(diagnostic_dump, indent=2, ensure_ascii=False)
