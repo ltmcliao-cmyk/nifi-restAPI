@@ -202,7 +202,7 @@ def sync_parameter_context_and_bind(target_pg, context_name: str, parameters: di
 
 
 def sync_controller_services(target_pg, cs_specs: list[dict]) -> dict[str, str]:
-    """建立並更新 Controller Services，回傳 {Service_Name: Service_UUID} 映射字典"""
+    """建立、更新配置並啟用 Controller Services，回傳 {Service_Name: Service_UUID} 映射字典"""
     if not cs_specs:
         return {}
 
@@ -210,18 +210,19 @@ def sync_controller_services(target_pg, cs_specs: list[dict]) -> dict[str, str]:
     cs_api = nipyapi.nifi.ControllerServicesApi()
     pg_api = nipyapi.nifi.ProcessGroupsApi()
 
-    # 1. 透過 FlowApi 取得目標 Process Group 內的現有 Controller Services
+    # 1. 取得目標 Process Group 內的現有 Controller Services
     existing_resp = flow_api.get_controller_services_from_group(id=target_pg.id)
     existing_cs = {
         cs.component.name: cs for cs in (existing_resp.controller_services or [])
     }
 
     cs_id_map: dict[str, str] = {}
-    service_entities: dict[str, Any] = {}
+    ordered_names: list[str] = []
 
     # 2. 建立或取得所有 Controller Services 實體與 UUID
     for cs_spec in cs_specs:
         name = cs_spec["name"]
+        ordered_names.append(name)
         if name in existing_cs:
             cs_entity = existing_cs[name]
         else:
@@ -234,14 +235,12 @@ def sync_controller_services(target_pg, cs_specs: list[dict]) -> dict[str, str]:
                     bundle=cs_type.bundle
                 )
             )
-            # 使用 ProcessGroupsApi 中的 create_controller_service1
             if hasattr(pg_api, "create_controller_service1"):
                 cs_entity = pg_api.create_controller_service1(id=target_pg.id, body=req_body)
             else:
                 cs_entity = pg_api.create_controller_service(id=target_pg.id, body=req_body)
 
         cs_id_map[name] = cs_entity.id
-        service_entities[name] = cs_entity
 
     # 3. 替換相互參照的 Service 名稱並更新配置
     for cs_spec in cs_specs:
@@ -249,14 +248,14 @@ def sync_controller_services(target_pg, cs_specs: list[dict]) -> dict[str, str]:
         cs_id = cs_id_map[name]
         cs_entity = cs_api.get_controller_service(id=cs_id)
 
-        # 將屬性中參照其他 Controller Service 的名稱換成實體 UUID
+        # 替換屬性中參照其他 Controller Service 的名稱為實體 UUID
         raw_props = cs_spec.get("properties", {})
         resolved_props = {
             k: cs_id_map.get(str(v), str(v))
             for k, v in raw_props.items()
         }
 
-        # 若已啟用則先停用以允許修改
+        # 若已啟用則先停用以允許修改屬性
         if cs_entity.component.state == "ENABLED":
             try:
                 run_status_body = nipyapi.nifi.ControllerServiceRunStatusEntity(
@@ -264,6 +263,7 @@ def sync_controller_services(target_pg, cs_specs: list[dict]) -> dict[str, str]:
                     state="DISABLED"
                 )
                 cs_entity = cs_api.update_run_status(id=cs_id, body=run_status_body)
+                time.sleep(0.5)
             except Exception:
                 pass
 
@@ -271,22 +271,31 @@ def sync_controller_services(target_pg, cs_specs: list[dict]) -> dict[str, str]:
         cs_entity = cs_api.get_controller_service(id=cs_id)
         cs_entity.component.properties = resolved_props
         cs_entity = cs_api.update_controller_service(id=cs_id, body=cs_entity)
-        service_entities[name] = cs_entity
         print(f"⚙️ Controller Service [{name}] 配置完成 (ID: {cs_id})")
 
-    # 4. 啟用所有 Controller Services
-    for name, cs_entity in service_entities.items():
-        try:
-            curr = cs_api.get_controller_service(id=cs_entity.id)
-            if curr.component.state != "ENABLED":
+    # 4. 按順序啟用 Controller Services 並輪詢確認狀態
+    for name in ordered_names:
+        cs_id = cs_id_map[name]
+        curr = cs_api.get_controller_service(id=cs_id)
+        if curr.component.state != "ENABLED":
+            try:
                 run_status_body = nipyapi.nifi.ControllerServiceRunStatusEntity(
                     revision=curr.revision,
                     state="ENABLED"
                 )
                 cs_api.update_run_status(id=curr.id, body=run_status_body)
-            print(f"▶️ Controller Service [{name}] 已啟用")
-        except Exception as e:
-            logger.warning(f"啟用 Controller Service [{name}] 時略過: {e}")
+
+                # 等待直到真正變為 ENABLED (最多等待 10 秒)
+                for _ in range(10):
+                    time.sleep(1)
+                    curr = cs_api.get_controller_service(id=curr.id)
+                    if curr.component.state == "ENABLED":
+                        break
+            except Exception as e:
+                logger.warning(f"啟用 Controller Service [{name}] 時略過: {e}")
+
+        final_state = curr.component.state
+        print(f"▶️ Controller Service [{name}] 狀態: {final_state}")
 
     return cs_id_map
 

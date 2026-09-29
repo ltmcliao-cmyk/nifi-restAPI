@@ -22,6 +22,7 @@ controller_services:
       "Database User": "postgres"
       "Password": "postgrespassword123"
 
+  # Server 必須放在 Client 前面以便按序啟動
   - name: "DistributedMapCacheServer"
     type: "org.apache.nifi.distributed.cache.server.map.DistributedMapCacheServer"
     properties:
@@ -55,9 +56,9 @@ processors:
       "access_token": "$.access_token"
 
   - name: "Put_Token_To_Cache"
-    type: "org.apache.nifi.processors.distributed.cache.client.PutDistributedMapCache"
+    type: "org.apache.nifi.processors.standard.PutDistributedMapCache"
     properties:
-      "Distributed Cache Server": "DistributedMapCacheClient"
+      "Distributed Cache Service": "DistributedMapCacheClient"
       "Cache Entry Identifier": "tdx_token"
 
   # ---------------------------------------------------------
@@ -69,11 +70,11 @@ processors:
     properties: {}
 
   - name: "Fetch_Token_For_Station"
-    type: "org.apache.nifi.processors.distributed.cache.client.FetchDistributedMapCache"
+    type: "org.apache.nifi.processors.standard.FetchDistributedMapCache"
     properties:
-      "Distributed Cache Server": "DistributedMapCacheClient"
+      "Distributed Cache Service": "DistributedMapCacheClient"
       "Cache Entry Identifier": "tdx_token"
-      "Target Attribute": "tdx_token"
+      "Put Cache Value In Attribute": "tdx_token"
 
   - name: "Invoke_Station_API"
     type: "org.apache.nifi.processors.standard.InvokeHTTP"
@@ -95,7 +96,7 @@ processors:
       "JDBC Connection Pool": "PostgreSQL_DBCPConnectionPool"
 
   # ---------------------------------------------------------
-  # 子流 C：動態即時車位匯入鏈 (已改為 1 小時)[cite: 1]
+  # 子流 C：動態即時車位匯入鏈 (1 小時)
   # ---------------------------------------------------------
   - name: "Trigger_Availability_Sync"
     type: "org.apache.nifi.processors.standard.GenerateFlowFile"
@@ -103,11 +104,11 @@ processors:
     properties: {}
 
   - name: "Fetch_Token_For_Availability"
-    type: "org.apache.nifi.processors.distributed.cache.client.FetchDistributedMapCache"
+    type: "org.apache.nifi.processors.standard.FetchDistributedMapCache"
     properties:
-      "Distributed Cache Server": "DistributedMapCacheClient"
+      "Distributed Cache Service": "DistributedMapCacheClient"
       "Cache Entry Identifier": "tdx_token"
-      "Target Attribute": "tdx_token"
+      "Put Cache Value In Attribute": "tdx_token"
 
   - name: "Invoke_Availability_API"
     type: "org.apache.nifi.processors.standard.InvokeHTTP"
@@ -154,7 +155,7 @@ connections:
     destination: "Insert_Station_To_DB"
     relationship: "success"
 
-  # 子流 C 連線 (含背壓限制保護)
+  # 子流 C 連線
   - source: "Trigger_Availability_Sync"
     destination: "Fetch_Token_For_Availability"
     relationship: "success"
