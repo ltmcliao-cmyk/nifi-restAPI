@@ -2,8 +2,8 @@ name: Archive TDX Raw Data to Disk
 
 on:
   schedule:
-    # 每個小時的第 30 分鐘執行一次（避開整點尖峰負載）
-    - cron: '30 * * * *'
+    # 每個小時的第 32 分鐘執行一次（避開整點尖峰負載）
+    - cron: '32 * * * *'
   workflow_dispatch:
     inputs:
       force_refresh_token:
