@@ -1,0 +1,325 @@
+name: NiFi Pipeline Diagnostic Dump
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_group_name:
+        description: '欲診斷的 Process Group 名稱 (或直接填 UUID)'
+        required: true
+        default: 'TDX_YouBike_To_Postgres_RAW'
+
+jobs:
+  diagnose:
+    name: Collect NiFi Diagnostic Data
+    runs-on: self-hosted
+    steps:
+      - name: Extract NiFi State & Assemble AI Diagnostic JSON
+        shell: python
+        env:
+          NIFI_HOST: 'http://localhost:8080/nifi-api'
+          TARGET_NAME: ${{ github.event.inputs.target_group_name }}
+          GITHUB_STEP_SUMMARY: ${{ env.GITHUB_STEP_SUMMARY }}
+        run: |
+          import json
+          import os
+          import sys
+          import time
+          import urllib.error
+          import urllib.request
+
+          # ---------------------------------------------------------
+          # 基礎 HTTP 輔助函式 (純標準函式庫，支援 Windows Runner)
+          # ---------------------------------------------------------
+          def api_request(url, method="GET", data=None):
+              headers = {"Content-Type": "application/json", "Accept": "application/json"}
+              body = json.dumps(data).encode("utf-8") if data else None
+              req = urllib.request.Request(url, data=body, headers=headers, method=method)
+              try:
+                  with urllib.request.urlopen(req, timeout=10) as response:
+                      res_text = response.read().decode("utf-8")
+                      return json.loads(res_text) if res_text else {}
+              except urllib.error.HTTPError as e:
+                  err_body = e.read().decode("utf-8", errors="ignore")
+                  print(f"[HTTP {e.code}] {url} - {err_body}", file=sys.stderr)
+                  return None
+              except Exception as e:
+                  print(f"[Connection Error] {url} - {e}", file=sys.stderr)
+                  return None
+
+          nifi_host = os.environ.get("NIFI_HOST", "http://localhost:8080/nifi-api").rstrip("/")
+          target_name = os.environ.get("TARGET_NAME", "TDX_YouBike_To_Postgres_RAW").strip()
+          summary_file = os.environ.get("GITHUB_STEP_SUMMARY")
+
+          print(f"=== 開始診斷 NiFi 執行個體: {nifi_host} ===")
+          print(f"=== 目標管線名稱 / ID: {target_name} ===")
+
+          # ---------------------------------------------------------
+          # 步驟 1: 尋找目標 Process Group ID
+          # ---------------------------------------------------------
+          root_flow = api_request(f"{nifi_host}/flow/process-groups/root")
+          if not root_flow:
+              print("無法連線至 NiFi 根節點，請確認本機 Podman NiFi 容器是否正常運作。", file=sys.stderr)
+              sys.exit(1)
+
+          pg_flow = root_flow.get("processGroupFlow", {})
+          root_id = pg_flow.get("id")
+          target_id = None
+
+          child_groups = pg_flow.get("flow", {}).get("processGroups", [])
+          for g in child_groups:
+              comp = g.get("component", {})
+              if comp.get("name") == target_name or g.get("id") == target_name:
+                  target_id = g.get("id")
+                  target_name = comp.get("name", target_name)
+                  break
+
+          if not target_id:
+              if target_name.lower() in ["root", "default"] or target_name == pg_flow.get("breadcrumb", {}).get("breadcrumb", {}).get("name"):
+                  target_id = root_id
+              else:
+                  print(f"找不到名稱為 '{target_name}' 的 Process Group！", file=sys.stderr)
+                  print("目前畫布上現有的 Group 清單:", file=sys.stderr)
+                  for g in child_groups:
+                      print(f" - {g.get('component', {}).get('name')} (ID: {g.get('id')})", file=sys.stderr)
+                  sys.exit(1)
+
+          print(f"鎖定目標 Process Group: {target_name} (ID: {target_id})")
+
+          # ---------------------------------------------------------
+          # 步驟 2: 抓取拓撲藍圖 (端點 1) 與運行狀態 (端點 2)
+          # ---------------------------------------------------------
+          flow_data = api_request(f"{nifi_host}/flow/process-groups/{target_id}")
+          status_data = api_request(f"{nifi_host}/flow/process-groups/{target_id}/status?recursive=true")
+          cs_data = api_request(f"{nifi_host}/flow/process-groups/{target_id}/controller-services")
+
+          processors_raw = flow_data.get("processGroupFlow", {}).get("flow", {}).get("processors", []) if flow_data else []
+          connections_raw = flow_data.get("processGroupFlow", {}).get("flow", {}).get("connections", []) if flow_data else []
+          status_snapshots = status_data.get("processGroupStatus", {}).get("aggregateSnapshot", {}) if status_data else {}
+          proc_statuses = {p.get("id"): p for p in status_snapshots.get("processorStatusSnapshots", [])}
+          conn_statuses = {c.get("id"): c for c in status_snapshots.get("connectionStatusSnapshots", [])}
+
+          # ---------------------------------------------------------
+          # 步驟 3: 提取 Processor (去視覺雜訊、保留全量屬性與驗證錯誤)
+          # ---------------------------------------------------------
+          component_ids = set()
+          processors_clean = []
+          invalid_or_stopped = []
+
+          for p in processors_raw:
+              p_id = p.get("id")
+              component_ids.add(p_id)
+              comp = p.get("component", {})
+              p_stat = proc_statuses.get(p_id, {}).get("processorStatusSnapshot", {})
+
+              proc_info = {
+                  "id": p_id,
+                  "name": comp.get("name"),
+                  "type": comp.get("type"),
+                  "state": comp.get("state"),
+                  "runStatus": p_stat.get("runStatus", comp.get("state")),
+                  "validationErrors": comp.get("validationErrors", []),
+                  "properties": comp.get("config", {}).get("properties", {}),
+                  "schedulingStrategy": comp.get("config", {}).get("schedulingStrategy"),
+                  "schedulingPeriod": comp.get("config", {}).get("schedulingPeriod"),
+                  "autoTerminatedRelationships": comp.get("config", {}).get("autoTerminatedRelationships", []),
+                  "metrics": {
+                      "activeThreadCount": p_stat.get("activeThreadCount", 0),
+                      "flowFilesQueued": p_stat.get("flowFilesQueued", 0),
+                      "bytesQueued": p_stat.get("bytesQueued", 0),
+                      "bytesRead": p_stat.get("bytesRead", 0),
+                      "bytesWritten": p_stat.get("bytesWritten", 0)
+                  }
+              }
+              processors_clean.append(proc_info)
+
+              # 標記異常節點
+              if proc_info["validationErrors"] or proc_info["runStatus"] in ["Stopped", "Invalid", "Disabled"]:
+                  invalid_or_stopped.append({
+                      "name": proc_info["name"],
+                      "type": proc_info["type"],
+                      "runStatus": proc_info["runStatus"],
+                      "validationErrors": proc_info["validationErrors"]
+                  })
+
+          # ---------------------------------------------------------
+          # 步驟 4: 提取 Connection (流向、背壓與塞車判斷)
+          # ---------------------------------------------------------
+          connections_clean = []
+          congested_connections = []
+
+          for c in connections_raw:
+              c_id = c.get("id")
+              component_ids.add(c_id)
+              comp = c.get("component", {})
+              c_stat = conn_statuses.get(c_id, {}).get("connectionStatusSnapshot", {})
+
+              queued_count = c_stat.get("queuedCount", 0)
+              queued_bytes = c_stat.get("queuedBytes", 0)
+              threshold_obj = comp.get("backPressureObjectThreshold", 10000)
+
+              conn_info = {
+                  "id": c_id,
+                  "name": comp.get("name") or f"{comp.get('source', {}).get('name')} -> {comp.get('destination', {}).get('name')}",
+                  "source": {"id": comp.get("source", {}).get("id"), "name": comp.get("source", {}).get("name")},
+                  "destination": {"id": comp.get("destination", {}).get("id"), "name": comp.get("destination", {}).get("name")},
+                  "selectedRelationships": comp.get("selectedRelationships", []),
+                  "backPressureObjectThreshold": threshold_obj,
+                  "queuedCount": queued_count,
+                  "queuedBytes": queued_bytes,
+                  "isCongested": queued_count > 0
+              }
+              connections_clean.append(conn_info)
+
+              if queued_count > 0:
+                  congested_connections.append(conn_info)
+
+          # ---------------------------------------------------------
+          # 步驟 5: 抓取 Bulletin Board (端點 3，過濾本 Group 之 WARNING/ERROR)
+          # ---------------------------------------------------------
+          bulletins_raw = api_request(f"{nifi_host}/flow/bulletin-board")
+          bulletin_errors = []
+
+          if bulletins_raw:
+              board = bulletins_raw.get("bulletinBoard", {})
+              for b in board.get("bulletins", []):
+                  b_data = b.get("bulletin", {})
+                  source_id = b_data.get("sourceId")
+                  level = b_data.get("level")
+
+                  # 只抓取與此 Group 組件相關，且等級為 WARNING 或 ERROR 的紀錄
+                  if (source_id in component_ids or b_data.get("groupId") == target_id) and level in ["WARNING", "ERROR"]:
+                      bulletin_errors.append({
+                          "timestamp": b_data.get("timestamp"),
+                          "level": level,
+                          "sourceName": b_data.get("sourceName"),
+                          "sourceId": source_id,
+                          "category": b_data.get("category"),
+                          "message": b_data.get("message")
+                      })
+
+          # ---------------------------------------------------------
+          # 步驟 6: 佇列滯留資料採樣 (端點 4，僅針對 congested 佇列抽樣 3 筆)
+          # ---------------------------------------------------------
+          stuck_samples = []
+          for cc in congested_connections:
+              c_id = cc["id"]
+              # 發起 listing 請求
+              listing_post = api_request(f"{nifi_host}/flowfile-queues/{c_id}/listing-requests", method="POST")
+              if listing_post and "listingRequest" in listing_post:
+                  req_id = listing_post["listingRequest"]["id"]
+                  time.sleep(0.5)  # 等待佇列快照完成
+
+                  listing_res = api_request(f"{nifi_host}/flowfile-queues/{c_id}/listing-requests/{req_id}")
+                  # 清除 request
+                  api_request(f"{nifi_host}/flowfile-queues/{c_id}/listing-requests/{req_id}", method="DELETE")
+
+                  if listing_res and "listingRequest" in listing_res:
+                      summaries = listing_res["listingRequest"].get("flowFileSummaries", [])[:3]
+                      sampled_files = [{
+                          "uuid": f.get("uuid"),
+                          "size": f.get("size"),
+                          "queuedDuration": f.get("queuedDuration"),
+                          "attributes": f.get("attributes", {})
+                      } for f in summaries]
+
+                      stuck_samples.append({
+                          "connectionId": c_id,
+                          "connectionName": cc["name"],
+                          "queuedCount": cc["queuedCount"],
+                          "sampleFlowFiles": sampled_files
+                      })
+
+          # ---------------------------------------------------------
+          # 步驟 7: 萃取 Controller Services (DBCP 連線池、快取服務等狀態)
+          # ---------------------------------------------------------
+          controller_services_clean = []
+          if cs_data:
+              for cs in cs_data.get("controllerServices", []):
+                  cs_comp = cs.get("component", {})
+                  controller_services_clean.append({
+                      "id": cs.get("id"),
+                      "name": cs_comp.get("name"),
+                      "type": cs_comp.get("type"),
+                      "state": cs_comp.get("state"),
+                      "validationErrors": cs_comp.get("validationErrors", []),
+                      "properties": cs_comp.get("properties", {})
+                  })
+
+          # ---------------------------------------------------------
+          # 步驟 8: 聚合產出「AI 專用診斷包」
+          # ---------------------------------------------------------
+          diagnostic_dump = {
+              "meta": {
+                  "scanTime": time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime()),
+                  "targetGroupName": target_name,
+                  "targetGroupId": target_id
+              },
+              "healthSummary": {
+                  "totalProcessors": len(processors_clean),
+                  "invalidOrStoppedCount": len(invalid_or_stopped),
+                  "bulletinErrorCount": len(bulletin_errors),
+                  "congestedConnectionCount": len(congested_connections)
+              },
+              "invalidOrStoppedProcessors": invalid_or_stopped,
+              "bulletinErrorsAndWarnings": bulletin_errors,
+              "congestedQueues": congested_connections,
+              "stuckFlowFileSamples": stuck_samples,
+              "controllerServices": controller_services_clean,
+              "allProcessorsBlueprint": processors_clean,
+              "connectionsTopology": connections_clean
+          }
+
+          # 寫入本機檔案
+          output_filename = "nifi_diagnostic_dump.json"
+          with open(output_filename, "w", encoding="utf-8") as f:
+              json.dump(diagnostic_dump, f, indent=2, ensure_ascii=False)
+          print(f"已產出完整診斷檔案: {output_filename}")
+
+          # ---------------------------------------------------------
+          # 步驟 9: 輸出至 GitHub Actions Summary (供一鍵複製)
+          # ---------------------------------------------------------
+          if summary_file:
+              dump_json_str = json.dumps(diagnostic_dump, indent=2, ensure_ascii=False)
+              md = []
+              md.append(f"## 🛠️ NiFi 管線即時診斷報告: `{target_name}`")
+              md.append(f"**掃描時間**: {diagnostic_dump['meta']['scanTime']} | **Group ID**: `{target_id}`\n")
+              md.append("### 📊 健康狀況摘要")
+              md.append(f"- **Processor 總數**: {len(processors_clean)}")
+              md.append(f"- **異常/停止節點**: `{len(invalid_or_stopped)}`")
+              md.append(f"- **系統告警 (Errors/Warnings)**: `{len(bulletin_errors)}`")
+              md.append(f"- **塞車佇列數**: `{len(congested_connections)}`\n")
+
+              if invalid_or_stopped:
+                  md.append("### ⚠️ 異常 / 未啟動 Processor")
+                  md.append("| 名稱 | 類型 | 狀態 | 驗證錯誤 |")
+                  md.append("| :--- | :--- | :--- | :--- |")
+                  for item in invalid_or_stopped:
+                      errs = "<br>".join(item["validationErrors"]) if item["validationErrors"] else "無"
+                      md.append(f"| **{item['name']}** | `{item['type'].split('.')[-1]}` | `{item['runStatus']}` | {errs} |")
+                  md.append("")
+
+              if bulletin_errors:
+                  md.append("### 🚨 最新重大例外與報錯 (Bulletin Board)")
+                  md.append("| 時間 | 等級 | 來源節點 | 錯誤訊息摘要 |")
+                  md.append("| :--- | :--- | :--- | :--- |")
+                  for b in bulletin_errors[:8]:
+                      msg = b["message"].replace("\n", " ").replace("|", "\\|")[:140]
+                      md.append(f"| {b['timestamp']} | **{b['level']}** | {b['sourceName']} | `{msg}...` |")
+                  md.append("")
+
+              md.append("### 📋 AI 診斷專用 JSON (請點擊右上方 Copy 按鈕整包餵給 AI)")
+              md.append("<details open><summary>點擊展開/收合 JSON</summary>\n")
+              md.append("```json")
+              md.append(dump_json_str)
+              md.append("```\n")
+              md.append("</details>")
+
+              with open(summary_file, "a", encoding="utf-8") as sf:
+                  sf.write("\n".join(md))
+
+      - name: Upload Diagnostic JSON as Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nifi-diagnostic-dump
+          path: nifi_diagnostic_dump.json
+          if-no-files-found: warn
