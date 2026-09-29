@@ -208,6 +208,7 @@ def sync_controller_services(target_pg, cs_specs: list[dict]) -> dict[str, str]:
 
     flow_api = nipyapi.nifi.FlowApi()
     cs_api = nipyapi.nifi.ControllerServicesApi()
+    pg_api = nipyapi.nifi.ProcessGroupsApi()
 
     # 1. 透過 FlowApi 取得目標 Process Group 內的現有 Controller Services
     existing_resp = flow_api.get_controller_services_from_group(id=target_pg.id)
@@ -216,7 +217,7 @@ def sync_controller_services(target_pg, cs_specs: list[dict]) -> dict[str, str]:
     }
 
     cs_id_map: dict[str, str] = {}
-    created_or_updated: list[Any] = []
+    service_entities: dict[str, Any] = {}
 
     # 2. 建立或取得所有 Controller Services 實體與 UUID
     for cs_spec in cs_specs:
@@ -225,12 +226,18 @@ def sync_controller_services(target_pg, cs_specs: list[dict]) -> dict[str, str]:
             cs_entity = existing_cs[name]
         else:
             cs_type = resolve_controller_service_type(cs_spec["type"])
-            cs_entity = nipyapi.canvas.create_controller_service(
-                parent=target_pg,
-                service=cs_type,
-                name=name
+            req_body = nipyapi.nifi.ControllerServiceEntity(
+                revision=nipyapi.nifi.RevisionDTO(version=0),
+                component=nipyapi.nifi.ControllerServiceDTO(
+                    name=name,
+                    type=cs_type.type,
+                    bundle=cs_type.bundle
+                )
             )
+            cs_entity = pg_api.create_controller_service(id=target_pg.id, body=req_body)
+        
         cs_id_map[name] = cs_entity.id
+        service_entities[name] = cs_entity
 
     # 3. 替換相互參照的 Service 名稱並更新配置
     for cs_spec in cs_specs:
@@ -248,26 +255,34 @@ def sync_controller_services(target_pg, cs_specs: list[dict]) -> dict[str, str]:
         # 若已啟用則先停用以允許修改
         if cs_entity.component.state == "ENABLED":
             try:
-                nipyapi.canvas.schedule_controller_service(cs_entity, scheduled=False, refresh=True)
-                cs_entity = cs_api.get_controller_service(id=cs_id)
+                run_status_body = nipyapi.nifi.ControllerServiceRunStatusEntity(
+                    revision=cs_entity.revision,
+                    state="DISABLED"
+                )
+                cs_entity = cs_api.update_run_status(id=cs_id, body=run_status_body)
             except Exception:
                 pass
 
         # 寫入最新配置
+        cs_entity = cs_api.get_controller_service(id=cs_id)
         cs_entity.component.properties = resolved_props
         cs_entity = cs_api.update_controller_service(id=cs_id, body=cs_entity)
-        created_or_updated.append(cs_entity)
+        service_entities[name] = cs_entity
         print(f"⚙️ Controller Service [{name}] 配置完成 (ID: {cs_id})")
 
     # 4. 啟用所有 Controller Services
-    for cs_entity in created_or_updated:
+    for name, cs_entity in service_entities.items():
         try:
             curr = cs_api.get_controller_service(id=cs_entity.id)
             if curr.component.state != "ENABLED":
-                nipyapi.canvas.schedule_controller_service(curr, scheduled=True, refresh=True)
-            print(f"▶️ Controller Service [{cs_entity.component.name}] 已啟用")
+                run_status_body = nipyapi.nifi.ControllerServiceRunStatusEntity(
+                    revision=curr.revision,
+                    state="ENABLED"
+                )
+                cs_api.update_run_status(id=curr.id, body=run_status_body)
+            print(f"▶️ Controller Service [{name}] 已啟用")
         except Exception as e:
-            logger.warning(f"啟用 Controller Service [{cs_entity.component.name}] 時略過: {e}")
+            logger.warning(f"啟用 Controller Service [{name}] 時略過: {e}")
 
     return cs_id_map
 
