@@ -1,0 +1,171 @@
+pipeline_name: "TDX_YouBike_To_Postgres_RAW"
+
+parameters:
+  TDX_Token_URL: "https://tdx.transportdata.tw/auth/realms/TDXConnect/protocol/openid-connect/token"
+  TDX_Station_URL: "https://tdx.transportdata.tw/api/basic/v2/Bike/Station/City/Taipei"
+  TDX_Availability_URL: "https://tdx.transportdata.tw/api/basic/v2/Bike/Availability/City/Taipei"
+  TDX_Client_ID: "ltmcliao-89a1f100-a9ac-47ab"
+  TDX_Client_Secret: "13a86ee7-314e-47a8-ac77-ffeb2f5660bd"
+  DB_URL: "jdbc:postgresql://postgres:5432/pipeline_db"
+  DB_User: "postgres"
+  DB_Password: "postgrespassword123"
+  DB_Driver: "org.postgresql.Driver"
+  DB_Driver_Location: "/opt/nifi/nifi-current/drivers/postgresql-42.7.3.jar"
+
+controller_services:
+  - name: "PostgreSQL_DBCPConnectionPool"
+    type: "org.apache.nifi.dbcp.DBCPConnectionPool"
+    properties:
+      "Database Connection URL": "jdbc:postgresql://postgres:5432/pipeline_db"
+      "Database Driver Class Name": "org.postgresql.Driver"
+      "Database Driver Location(s)": "/opt/nifi/nifi-current/drivers/postgresql-42.7.3.jar"
+      "Database User": "postgres"
+      "Password": "postgrespassword123"
+
+  - name: "DistributedMapCacheServer"
+    type: "org.apache.nifi.distributed.cache.server.map.DistributedMapCacheServer"
+    properties:
+      "Port": "4557"
+
+  - name: "DistributedMapCacheClient"
+    type: "org.apache.nifi.distributed.cache.client.DistributedMapCacheClientService"
+    properties:
+      "Server Hostname": "localhost"
+      "Server Port": "4557"
+
+processors:
+  # ---------------------------------------------------------
+  # 子流 A：Token 維護鏈 (低頻 23 小時)
+  # ---------------------------------------------------------
+  - name: "Trigger_Token_Refresh"
+    type: "org.apache.nifi.processors.standard.GenerateFlowFile"
+    scheduling_period: "23 hrs"
+    properties: {}
+
+  - name: "Invoke_TDX_Auth"
+    type: "org.apache.nifi.processors.standard.InvokeHTTP"
+    properties:
+      "HTTP Method": "POST"
+      "Remote URL": "https://tdx.transportdata.tw/auth/realms/TDXConnect/protocol/openid-connect/token"
+      "Content-Type": "application/x-www-form-urlencoded"
+
+  - name: "Extract_Token_JSON"
+    type: "org.apache.nifi.processors.standard.EvaluateJsonPath"
+    properties:
+      "access_token": "$.access_token"
+
+  - name: "Put_Token_To_Cache"
+    type: "org.apache.nifi.processors.distributed.cache.client.PutDistributedMapCache"
+    properties:
+      "Distributed Cache Server": "DistributedMapCacheClient"
+      "Cache Entry Identifier": "tdx_token"
+
+  # ---------------------------------------------------------
+  # 子流 B：靜態站位資料匯入鏈 (低頻 1 天)
+  # ---------------------------------------------------------
+  - name: "Trigger_Station_Sync"
+    type: "org.apache.nifi.processors.standard.GenerateFlowFile"
+    scheduling_period: "24 hrs"
+    properties: {}
+
+  - name: "Fetch_Token_For_Station"
+    type: "org.apache.nifi.processors.distributed.cache.client.FetchDistributedMapCache"
+    properties:
+      "Distributed Cache Server": "DistributedMapCacheClient"
+      "Cache Entry Identifier": "tdx_token"
+      "Target Attribute": "tdx_token"
+
+  - name: "Invoke_Station_API"
+    type: "org.apache.nifi.processors.standard.InvokeHTTP"
+    properties:
+      "HTTP Method": "GET"
+      "Remote URL": "https://tdx.transportdata.tw/api/basic/v2/Bike/Station/City/Taipei"
+      "Authorization: Bearer": "${tdx_token}"
+      "Accept-Encoding": "gzip"
+
+  - name: "Prepare_Station_SQL"
+    type: "org.apache.nifi.processors.standard.ReplaceText"
+    properties:
+      "Replacement Value": "INSERT INTO raw_bike_station (source_endpoint, payload) VALUES ('Bike-Station-Taipei', '${toBase64():base64Decode()}'::jsonb);"
+      "Evaluation Mode": "Entire text"
+
+  - name: "Insert_Station_To_DB"
+    type: "org.apache.nifi.processors.standard.PutSQL"
+    properties:
+      "JDBC Connection Pool": "PostgreSQL_DBCPConnectionPool"
+
+  # ---------------------------------------------------------
+  # 子流 C：動態即時車位匯入鏈 (已改為 1 小時)[cite: 1]
+  # ---------------------------------------------------------
+  - name: "Trigger_Availability_Sync"
+    type: "org.apache.nifi.processors.standard.GenerateFlowFile"
+    scheduling_period: "1 hr"
+    properties: {}
+
+  - name: "Fetch_Token_For_Availability"
+    type: "org.apache.nifi.processors.distributed.cache.client.FetchDistributedMapCache"
+    properties:
+      "Distributed Cache Server": "DistributedMapCacheClient"
+      "Cache Entry Identifier": "tdx_token"
+      "Target Attribute": "tdx_token"
+
+  - name: "Invoke_Availability_API"
+    type: "org.apache.nifi.processors.standard.InvokeHTTP"
+    properties:
+      "HTTP Method": "GET"
+      "Remote URL": "https://tdx.transportdata.tw/api/basic/v2/Bike/Availability/City/Taipei"
+      "Authorization: Bearer": "${tdx_token}"
+      "Accept-Encoding": "gzip"
+
+  - name: "Prepare_Availability_SQL"
+    type: "org.apache.nifi.processors.standard.ReplaceText"
+    properties:
+      "Replacement Value": "INSERT INTO raw_bike_availability (source_endpoint, payload) VALUES ('Bike-Availability-Taipei', '${toBase64():base64Decode()}'::jsonb);"
+      "Evaluation Mode": "Entire text"
+
+  - name: "Insert_Availability_To_DB"
+    type: "org.apache.nifi.processors.standard.PutSQL"
+    properties:
+      "JDBC Connection Pool": "PostgreSQL_DBCPConnectionPool"
+
+connections:
+  # 子流 A 連線
+  - from: "Trigger_Token_Refresh"
+    to: "Invoke_TDX_Auth"
+    relationship: "success"
+  - from: "Invoke_TDX_Auth"
+    to: "Extract_Token_JSON"
+    relationship: "Response"
+  - from: "Extract_Token_JSON"
+    to: "Put_Token_To_Cache"
+    relationship: "matched"
+
+  # 子流 B 連線
+  - from: "Trigger_Station_Sync"
+    to: "Fetch_Token_For_Station"
+    relationship: "success"
+  - from: "Fetch_Token_For_Station"
+    to: "Invoke_Station_API"
+    relationship: "success"
+  - from: "Invoke_Station_API"
+    to: "Prepare_Station_SQL"
+    relationship: "Response"
+  - from: "Prepare_Station_SQL"
+    to: "Insert_Station_To_DB"
+    relationship: "success"
+
+  # 子流 C 連線 (含背壓限制保護)
+  - from: "Trigger_Availability_Sync"
+    to: "Fetch_Token_For_Availability"
+    relationship: "success"
+  - from: "Fetch_Token_For_Availability"
+    to: "Invoke_Availability_API"
+    relationship: "success"
+  - from: "Invoke_Availability_API"
+    to: "Prepare_Availability_SQL"
+    relationship: "Response"
+  - from: "Prepare_Availability_SQL"
+    to: "Insert_Availability_To_DB"
+    relationship: "success"
+    backpressure_object_threshold: 10
+    backpressure_data_threshold: "1 MB"
