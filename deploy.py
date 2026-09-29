@@ -1,5 +1,5 @@
 """
-deploy.py —— 支援 Parameter Context、度量遙測與 Fork/Join 並行的純函數式 NiFi 部署管線
+deploy.py —— 支援 Parameter Context、Controller Services、度量遙測與 Fork/Join 並行的純函數式 NiFi 部署管線
 """
 from __future__ import annotations
 
@@ -20,19 +20,12 @@ logger = logging.getLogger("nifi_pipeline")
 
 
 def resolve_processor_type(type_identifier: str):
-    """
-    精確解析 NiFi Processor 類型，確保回傳單一 DocumentedTypeDTO 物件
-    支援全類別名 (FQCN) 或短名稱 (e.g. GenerateFlowFile)
-    """
-    # 1. 嘗試直接比對
+    """精確解析 NiFi Processor 類型"""
     proc_type = nipyapi.canvas.get_processor_type(type_identifier)
-    
-    # 2. 若傳入的是 FQCN (含點號)，嘗試用最後的類別短名搜尋
     if not proc_type and "." in type_identifier:
         short_name = type_identifier.split(".")[-1]
         proc_type = nipyapi.canvas.get_processor_type(short_name)
 
-    # 3. 若找不到，列出所有型別以全名比對
     if not proc_type:
         all_types = nipyapi.canvas.list_all_processor_types()
         for t in all_types:
@@ -40,16 +33,34 @@ def resolve_processor_type(type_identifier: str):
                 proc_type = t
                 break
 
-    # 4. 若回傳為清單，預設取第一項 (通常是最新 bundle 版本)
     if isinstance(proc_type, list):
         proc_type = proc_type[0] if proc_type else None
 
     if not proc_type or not isinstance(proc_type, nipyapi.nifi.DocumentedTypeDTO):
-        raise ValueError(
-            f"無法在目標 NiFi (位址: {nipyapi.config.nifi_config.host}) 找到 Processor 類型: '{type_identifier}'。"
-            f"請確認 NiFi 版本與 NAR 套件是否安裝正常。"
-        )
+        raise ValueError(f"無法在 NiFi 找到 Processor 類型: '{type_identifier}'")
     return proc_type
+
+
+def resolve_controller_service_type(type_identifier: str):
+    """精確解析 NiFi Controller Service 類型"""
+    cs_type = nipyapi.canvas.get_controller_service_type(type_identifier)
+    if not cs_type and "." in type_identifier:
+        short_name = type_identifier.split(".")[-1]
+        cs_type = nipyapi.canvas.get_controller_service_type(short_name)
+
+    if not cs_type:
+        all_types = nipyapi.canvas.list_all_controller_service_types()
+        for t in all_types:
+            if t.type == type_identifier:
+                cs_type = t
+                break
+
+    if isinstance(cs_type, list):
+        cs_type = cs_type[0] if cs_type else None
+
+    if not cs_type or not isinstance(cs_type, nipyapi.nifi.DocumentedTypeDTO):
+        raise ValueError(f"無法在 NiFi 找到 Controller Service 類型: '{type_identifier}'")
+    return cs_type
 
 
 # =====================================================================
@@ -58,12 +69,12 @@ def resolve_processor_type(type_identifier: str):
 def analyze_spec(spec: dict) -> dict:
     proc_specs = spec.get("processors", [])
     conn_specs = spec.get("connections", [])
+    cs_specs = spec.get("controller_services", [])
     parameters = spec.get("parameters", {})
 
     used_rels: dict[str, set[str]] = defaultdict(set)
     for c in conn_specs:
         src = c.get("source") or c.get("from")
-        # 兼容單數 relationship 與複數 relationships
         rels = c.get("relationships") or ([c["relationship"]] if "relationship" in c else [])
         for r in rels:
             if src:
@@ -72,10 +83,12 @@ def analyze_spec(spec: dict) -> dict:
     return {
         "pipeline_name": spec.get("pipeline_name", "Untitled_Pipeline"),
         "parameters": parameters,
+        "controller_services": cs_specs,
         "processors": proc_specs,
         "connections": conn_specs,
         "used_rels": dict(used_rels),
     }
+
 
 def calculate_auto_layout(processors: list[dict], connections: list[dict]) -> dict[str, tuple[int, int]]:
     in_degree = {p["name"]: 0 for p in processors}
@@ -111,6 +124,7 @@ def calculate_auto_layout(processors: list[dict], connections: list[dict]) -> di
         positions[name] = (200 + lvl * 380, 150 + row * 220)
     return positions
 
+
 # =====================================================================
 # 階段 2: 核心 NiFi I/O 操作 (無狀態, 單元可測)
 # =====================================================================
@@ -125,6 +139,7 @@ def ensure_process_group(target_name: str):
     if existing:
         return existing[0]
     return nipyapi.canvas.create_process_group(root_pg, target_name, (300, 200))
+
 
 def sync_parameter_context_and_bind(target_pg, context_name: str, parameters: dict[str, str]):
     if not parameters:
@@ -147,9 +162,7 @@ def sync_parameter_context_and_bind(target_pg, context_name: str, parameters: di
     if existing_ctx:
         ctx_entity = existing_ctx[0]
         ctx_entity = nipyapi.parameters.get_parameter_context(ctx_entity.id, identifier_type="id")
-        
         ctx_entity.component.parameters = param_dto_list
-        
         ctx_entity = nipyapi.nifi.ParameterContextsApi().update_parameter_context(
             id=ctx_entity.id,
             body=ctx_entity
@@ -178,7 +191,6 @@ def sync_parameter_context_and_bind(target_pg, context_name: str, parameters: di
                 name=context_name
             )
         )
-        
         nipyapi.nifi.ProcessGroupsApi().update_process_group(
             id=target_pg.id,
             body=target_pg
@@ -187,12 +199,79 @@ def sync_parameter_context_and_bind(target_pg, context_name: str, parameters: di
 
     return ctx_entity
 
+
+def sync_controller_services(target_pg, cs_specs: list[dict]) -> dict[str, str]:
+    """建立並更新 Controller Services，並回傳 {名稱: Service_ID} 對應字典"""
+    if not cs_specs:
+        return {}
+
+    existing_cs = {
+        cs.component.name: cs
+        for cs in (nipyapi.canvas.list_all_controller_services(target_pg.id) or [])
+    }
+
+    cs_id_map: dict[str, str] = {}
+    created_or_updated: list[Any] = []
+
+    # 第一階段：先確保所有 Controller Services 建立完成
+    for cs_spec in cs_specs:
+        name = cs_spec["name"]
+        if name in existing_cs:
+            cs_entity = existing_cs[name]
+        else:
+            cs_type = resolve_controller_service_type(cs_spec["type"])
+            cs_entity = nipyapi.canvas.create_controller_service(target_pg, cs_type, name=name)
+        cs_id_map[name] = cs_entity.id
+
+    # 第二階段：置換相互參照的 ID、更新屬性並啟動
+    for cs_spec in cs_specs:
+        name = cs_spec["name"]
+        cs_id = cs_id_map[name]
+        cs_entity = nipyapi.canvas.get_controller_service(cs_id, identifier_type="id")
+
+        # 替換屬性中的 Controller Service 名稱為其對應的 UUID
+        raw_props = cs_spec.get("properties", {})
+        resolved_props = {
+            k: cs_id_map.get(str(v), str(v))
+            for k, v in raw_props.items()
+        }
+
+        # 先停止以允許更新屬性
+        if cs_entity.component.state == "ENABLED":
+            nipyapi.canvas.schedule_controller_service(cs_entity, scheduled=False, refresh=True)
+            cs_entity = nipyapi.canvas.get_controller_service(cs_id, identifier_type="id")
+
+        cs_entity = nipyapi.canvas.update_variable_registry(
+            cs_entity,
+            update=resolved_props
+        ) if hasattr(nipyapi.canvas, "update_controller_service_properties") else nipyapi.canvas.get_controller_service(cs_id, identifier_type="id")
+        
+        # 使用 REST API 直接更新配置
+        cs_entity.component.properties = resolved_props
+        cs_entity = nipyapi.nifi.ControllerServicesApi().update_controller_service(
+            id=cs_entity.id,
+            body=cs_entity
+        )
+        created_or_updated.append(cs_entity)
+        print(f"⚙️ Controller Service [{name}] 配置完成 (ID: {cs_id})")
+
+    # 第三階段：啟用所有 Controller Services
+    for cs_entity in created_or_updated:
+        try:
+            nipyapi.canvas.schedule_controller_service(cs_entity, scheduled=True, refresh=True)
+        except Exception as e:
+            logger.warning(f"啟用 Controller Service [{cs_entity.component.name}] 時略過或等待完成: {e}")
+
+    return cs_id_map
+
+
 def interpolate_value(val: Any, parameters: dict[str, str]) -> Any:
     """替換字串中的 #{VAR} 變數"""
     if isinstance(val, str):
         for k, v in parameters.items():
             val = val.replace(f"#{{{k}}}", str(v))
     return val
+
 
 def sync_single_processor(
     target_pg,
@@ -201,6 +280,7 @@ def sync_single_processor(
     used_relationships: set[str],
     existing_processors: dict[str, Any],
     parameters: dict[str, str],
+    cs_id_map: dict[str, str],
 ) -> tuple[str, Any]:
     name = proc_spec["name"]
     if name in existing_processors:
@@ -209,20 +289,25 @@ def sync_single_processor(
             nipyapi.canvas.schedule_processor(proc_entity, scheduled=False, refresh=True)
             proc_entity = nipyapi.canvas.get_processor(proc_entity.id, identifier_type="id")
     else:
-        # 呼叫解析函式，取得 DocumentedTypeDTO
         proc_type = resolve_processor_type(proc_spec["type"])
         proc_entity = nipyapi.canvas.create_processor(target_pg, proc_type, position, name=name)
 
     all_relationships = {r.name for r in proc_entity.component.relationships}
     unused = list(all_relationships - used_relationships)
 
-    # 兼容頂層 scheduling_period 或內嵌 scheduling.period
     sched = proc_spec.get("scheduling", {})
     raw_period = proc_spec.get("scheduling_period") or sched.get("period", "0 sec")
     resolved_period = interpolate_value(raw_period, parameters)
 
+    # 關鍵修正：將 Processor 屬性中的 Controller Service 名稱轉換為 UUID
+    raw_props = proc_spec.get("properties", {})
+    resolved_props = {}
+    for k, v in raw_props.items():
+        v_str = str(v)
+        resolved_props[k] = cs_id_map.get(v_str, v_str)
+
     config = nipyapi.nifi.ProcessorConfigDTO(
-        properties=proc_spec.get("properties", {}),
+        properties=resolved_props,
         scheduling_strategy=sched.get("strategy", "TIMER_DRIVEN"),
         scheduling_period=resolved_period,
         concurrently_schedulable_task_count=sched.get("concurrent_tasks", 1),
@@ -230,6 +315,7 @@ def sync_single_processor(
         auto_terminated_relationships=unused,
     )
     return name, nipyapi.canvas.update_processor(proc_entity, config)
+
 
 def sync_single_connection(
     conn_spec: dict,
@@ -243,7 +329,6 @@ def sync_single_connection(
     if source is None or destination is None:
         return
 
-    # 兼容單數 relationship 與複數 relationships
     relationships = conn_spec.get("relationships")
     if not relationships and "relationship" in conn_spec:
         relationships = [conn_spec["relationship"]]
@@ -259,16 +344,9 @@ def sync_single_connection(
             source, destination, relationships=relationships
         )
         
-        # 讀取 flow_control 或連線屬性中的 backpressure 設定
         fc = conn_spec.get("flow_control", {})
-        bp_obj = (
-            conn_spec.get("backpressure_object_threshold")
-            or fc.get("back_pressure_count")
-        )
-        bp_data = (
-            conn_spec.get("backpressure_data_threshold")
-            or fc.get("back_pressure_size")
-        )
+        bp_obj = conn_spec.get("backpressure_object_threshold") or fc.get("back_pressure_count")
+        bp_data = conn_spec.get("backpressure_data_threshold") or fc.get("back_pressure_size")
 
         needs_update = False
         if bp_obj is not None:
@@ -287,8 +365,9 @@ def sync_single_connection(
                 body=conn
             )
 
+
 # =====================================================================
-# 階段 3: 線性編排器 (含度量與 Context 綁定)
+# 階段 3: 線性編排器 (含 Controller Service 綁定)
 # =====================================================================
 def run_deployment_pipeline(spec: dict, max_workers: int = 5, auto_start: bool = False) -> dict:
     metrics = {}
@@ -299,7 +378,7 @@ def run_deployment_pipeline(spec: dict, max_workers: int = 5, auto_start: bool =
     parsed = analyze_spec(spec)
     metrics["stage1_parse_ms"] = (time.perf_counter() - t0) * 1000
 
-    # 2. Fork 1: 座標 (CPU) 與 PG 查找 (I/O)
+    # 2. 座標 (CPU) 與 PG 查找 (I/O)
     t0 = time.perf_counter()
     with ThreadPoolExecutor(max_workers=2) as executor:
         future_pg = executor.submit(ensure_process_group, parsed["pipeline_name"])
@@ -316,7 +395,12 @@ def run_deployment_pipeline(spec: dict, max_workers: int = 5, auto_start: bool =
     sync_parameter_context_and_bind(target_pg, ctx_name, parsed["parameters"])
     metrics["stage2_5_parameter_context_ms"] = (time.perf_counter() - t0) * 1000
 
-    # 3. Fork 2: 節點建立與合併配置
+    # 2.8 建立並啟用 Controller Services，取得名稱與 UUID 對應表
+    t0 = time.perf_counter()
+    cs_id_map = sync_controller_services(target_pg, parsed["controller_services"])
+    metrics["stage2_8_controller_services_ms"] = (time.perf_counter() - t0) * 1000
+
+    # 3. 節點建立與合併配置 (使用 cs_id_map 注入 Service UUID)
     t0 = time.perf_counter()
     existing_processors = {
         p.component.name: p for p in nipyapi.canvas.list_all_processors(target_pg.id)
@@ -332,6 +416,7 @@ def run_deployment_pipeline(spec: dict, max_workers: int = 5, auto_start: bool =
                 set(parsed["used_rels"].get(p["name"], set())),
                 existing_processors,
                 parsed["parameters"],
+                cs_id_map,
             )
             for p in parsed["processors"]
         ]
@@ -340,7 +425,7 @@ def run_deployment_pipeline(spec: dict, max_workers: int = 5, auto_start: bool =
             active_processors[name] = entity
     metrics["stage3_fork2_processors_ms"] = (time.perf_counter() - t0) * 1000
 
-    # 4. Fork 3: 連線建立
+    # 4. 連線建立
     t0 = time.perf_counter()
     existing_connections = nipyapi.canvas.list_all_connections(target_pg.id)
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
