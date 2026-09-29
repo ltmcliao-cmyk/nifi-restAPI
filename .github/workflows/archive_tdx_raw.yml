@@ -2,9 +2,7 @@ name: Archive TDX Raw Data to Disk
 
 on:
   schedule:
-    # GitHub Actions 最短間隔為 5 分鐘
-    # '*/5 * * * *' 會在每小時的 00, 05, 10 ... 30, 35, 40 分自動觸發
-    # 剛好包含 14:35，並在此後維持每 5 分鐘的高頻動態採樣
+    # 每個 5 分鐘自動執行一次 (包含半點、整點)
     - cron: '*/5 * * * *'
   workflow_dispatch:
     inputs:
@@ -32,6 +30,12 @@ jobs:
           import urllib.request
           import urllib.parse
           import glob
+          import ssl
+
+          # -------------------------------------------------------------
+          # 0. 解決 Python 3.13 / 企業網路 SSL 憑證檢查失敗
+          # -------------------------------------------------------------
+          ssl_ctx = ssl._create_unverified_context()
 
           client_id = "ltmc.liao-89a1f100-a9ac-47ab"
           client_secret = "13a86ee7-314e-47a8-ac77-ffeb2f5660bd"
@@ -50,16 +54,15 @@ jobs:
               try:
                   with open(token_cache_path, "r", encoding="utf-8") as f:
                       cache = json.load(f)
-                      # 預留 10 分鐘緩衝期 (600秒)
                       if cache.get("expires_at", 0) > now_ts + 600:
                           token = cache.get("access_token")
                           remaining_hours = (cache["expires_at"] - now_ts) / 3600
                           print(f"[1/3] 沿用有效 Token (剩餘有效時間: {remaining_hours:.1f} 小時)")
               except Exception as e:
-                  print(f"快取讀取異常，重新申請: {e}")
+                  print(f"快取讀取異常，重新向 TDX 申請: {e}")
 
           if not token:
-              print("[1/3] 本地無有效 Token，向 TDX 申請全新 24 小時 Token...")
+              print("[1/3] 向 TDX 申請全新 24 小時 Token (已略過企業 SSL 憑證檢驗)...")
               token_url = "https://tdx.transportdata.tw/auth/realms/TDX/protocol/openid-connect/token"
               payload = urllib.parse.urlencode({
                   "grant_type": "client_credentials",
@@ -72,7 +75,7 @@ jobs:
                   data=payload,
                   headers={"Content-Type": "application/x-www-form-urlencoded"}
               )
-              with urllib.request.urlopen(req, timeout=10) as resp:
+              with urllib.request.urlopen(req, timeout=15, context=ssl_ctx) as resp:
                   token_data = json.loads(resp.read().decode("utf-8"))
                   token = token_data["access_token"]
                   expires_in = token_data.get("expires_in", 86400)
@@ -83,7 +86,7 @@ jobs:
                           "expires_at": now_ts + expires_in,
                           "updated_at": datetime.datetime.now().isoformat()
                       }, f, indent=2)
-                  print("  -> 全新 Token 申請成功並已快取至本地。")
+                  print("  -> 全新 Token 申請成功並已寫入本地快取。")
 
           # -------------------------------------------------------------
           # 2. 時間與目錄計算 (台北時間 UTC+8)
@@ -101,7 +104,7 @@ jobs:
                       "Accept": "application/json"
                   }
               )
-              with urllib.request.urlopen(api_req, timeout=15) as r:
+              with urllib.request.urlopen(api_req, timeout=20, context=ssl_ctx) as r:
                   raw_data = r.read()
 
               target_dir = os.path.join("data", "raw", category, date_str)
@@ -117,7 +120,7 @@ jobs:
               print(f"      筆數: {records_count} 筆 | 大小: {file_size_kb:.2f} KB")
 
           # -------------------------------------------------------------
-          # 3. 執行任務 (動態每 5 分鐘抓；靜態今天抓過就跳過)
+          # 3. 執行任務 (車位高頻採樣；站位一天僅抓一次)
           # -------------------------------------------------------------
           print("[2/3] 處理動態即時車位 (Availability)...")
           fetch_and_write("availability", "https://tdx.transportdata.tw/api/basic/v2/Bike/Availability/City/Taipei?%24format=JSON", "availability")
