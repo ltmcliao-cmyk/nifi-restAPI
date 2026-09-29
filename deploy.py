@@ -234,8 +234,12 @@ def sync_controller_services(target_pg, cs_specs: list[dict]) -> dict[str, str]:
                     bundle=cs_type.bundle
                 )
             )
-            cs_entity = pg_api.create_controller_service(id=target_pg.id, body=req_body)
-        
+            # 使用 ProcessGroupsApi 中的 create_controller_service1
+            if hasattr(pg_api, "create_controller_service1"):
+                cs_entity = pg_api.create_controller_service1(id=target_pg.id, body=req_body)
+            else:
+                cs_entity = pg_api.create_controller_service(id=target_pg.id, body=req_body)
+
         cs_id_map[name] = cs_entity.id
         service_entities[name] = cs_entity
 
