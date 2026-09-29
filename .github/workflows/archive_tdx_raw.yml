@@ -20,6 +20,9 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Fetch TDX and Save Raw JSON
+        env:
+          PYTHONUTF8: "1"
+          PYTHONIOENCODING: "utf-8"
         shell: python
         run: |
           import os
@@ -32,6 +35,10 @@ jobs:
           import glob
           import ssl
           import gzip
+
+          # 強制標準輸出為 UTF-8，防止 Windows cp950 崩潰
+          if hasattr(sys.stdout, 'reconfigure'):
+              sys.stdout.reconfigure(encoding='utf-8')
 
           # -------------------------------------------------------------
           # 1. 繞過公司內網 SSL 封包解密檢驗
@@ -128,8 +135,8 @@ jobs:
 
               records_count = len(json.loads(raw_data.decode("utf-8")))
               file_size_kb = os.path.getsize(file_path) / 1024
-              print(f"  [✓] {category} 儲存完成: {file_path}")
-              print(f"      筆數: {records_count} 筆 | 落盤大小: {file_size_kb:.2f} KB")
+              print(f"  [OK] {category} 儲存完成: {file_path}")
+              print(f"       筆數: {records_count} 筆 | 落盤大小: {file_size_kb:.2f} KB")
 
           # -------------------------------------------------------------
           # 4. 執行抓取任務 (車位每 5 分鐘；站位當日唯一)
@@ -142,9 +149,9 @@ jobs:
           existing_station_files = glob.glob(os.path.join(station_today_dir, "*.json"))
 
           if existing_station_files and not force_station:
-              print(f"  [跳過] 今日 ({date_str}) 已備份過靜態站位: {existing_station_files[0]}")
+              print(f"  [SKIP] 今日 ({date_str}) 已備份過靜態站位: {existing_station_files[0]}")
               print("         靜態站位一天僅抓取一次，跳過本次請求以節省配額。")
           else:
               fetch_and_write("station", "https://tdx.transportdata.tw/api/basic/v2/Bike/Station/City/Taipei?%24format=JSON", "station")
 
-          print(f"\n🎉 [{time_str}] 本次落盤任務執行完畢！")
+          print(f"\n[DONE] [{time_str}] 本次落盤任務執行完畢！")
