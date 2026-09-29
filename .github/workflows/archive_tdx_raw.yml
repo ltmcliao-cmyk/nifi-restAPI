@@ -2,10 +2,15 @@ name: Archive TDX Raw Data to Disk
 
 on:
   schedule:
-    # 每 5 分鐘自動執行一次
-    - cron: '*/5 * * * *'
+    # 每個小時的第 30 分鐘執行一次（避開整點尖峰負載）
+    - cron: '30 * * * *'
   workflow_dispatch:
     inputs:
+      force_refresh_token:
+        description: '強制重新取得 Token (True/False)'
+        required: false
+        default: 'false'
+        type: boolean
       force_station:
         description: '強制重新抓取今日靜態站位 (True/False)'
         required: false
@@ -36,44 +41,55 @@ jobs:
           import ssl
           import gzip
 
-          # 強制標準輸出為 UTF-8，防止 Windows cp950 崩潰
+          # 強制標準輸出為 UTF-8
           if hasattr(sys.stdout, 'reconfigure'):
               sys.stdout.reconfigure(encoding='utf-8')
 
           # -------------------------------------------------------------
-          # 0. 鎖定專案落地根目錄 (對齊 compose.yaml 所在專案)
+          # 0. 環境與時間初始化 (台北時間 UTC+8)
           # -------------------------------------------------------------
           BASE_DIR = r"C:\Users\lutomica\Desktop\Dana mission\data"
           os.makedirs(BASE_DIR, exist_ok=True)
           token_cache_path = os.path.join(BASE_DIR, "token_cache.json")
 
-          # 略過公司內網 SSL 封包解密檢驗
+          # 略過內網 Proxy/SSL 檢驗
           ssl_ctx = ssl._create_unverified_context()
 
           client_id = "ltmc.liao-89a1f100-a9ac-47ab"
           client_secret = "13a86ee7-314e-47a8-ac77-ffeb2f5660bd"
+          
+          force_refresh_token = "${{ github.event.inputs.force_refresh_token }}" == "true"
           force_station = "${{ github.event.inputs.force_station }}" == "true"
 
+          now_utc8 = datetime.datetime.now(datetime.timezone.utc).astimezone(datetime.timezone(datetime.timedelta(hours=8)))
+          date_str = now_utc8.strftime("%Y-%m-%d")
+          time_str = now_utc8.strftime("%Y%m%d_%H%M")
+          current_hour = now_utc8.hour  # 台北時間小時 (0~23)
+
           # -------------------------------------------------------------
-          # 1. Token 快取機制 (24 小時只換發一次)
+          # 1. Token 機制：每天下午 15:00 強制換發，其他時間沿用快取
           # -------------------------------------------------------------
           token = None
           now_ts = time.time()
+          is_3pm_window = (current_hour == 15)
 
-          if os.path.exists(token_cache_path):
+          # 檢查是否有今日 15 點換過的有效快取
+          if os.path.exists(token_cache_path) and not force_refresh_token:
               try:
                   with open(token_cache_path, "r", encoding="utf-8") as f:
                       cache = json.load(f)
-                      # 預留 10 分鐘緩衝期 (600 秒)
-                      if cache.get("expires_at", 0) > now_ts + 600:
+                      token_date = cache.get("updated_date")
+                      # 若不是下午 3 點窗口，或者今天 15 點已經成功換發過，直接沿用
+                      if not (is_3pm_window and token_date != date_str) and cache.get("expires_at", 0) > now_ts + 600:
                           token = cache.get("access_token")
                           remaining_hours = (cache["expires_at"] - now_ts) / 3600
-                          print(f"[1/3] 沿用本地有效 Token (剩餘有效時間: {remaining_hours:.1f} 小時)")
+                          print(f"[1/3] 沿用本地 Token (剩餘有效: {remaining_hours:.1f} 小時)")
               except Exception as e:
                   print(f"快取讀取異常，重新申請: {e}")
 
           if not token:
-              print("[1/3] 本地無有效 Token，向 TDX 申請全新 24 小時 Token...")
+              reason = "下午 3 點例行更換" if is_3pm_window else "本地無有效快取/強制更換"
+              print(f"[1/3] 觸發 Token 換發 ({reason})...")
               token_url = "https://tdx.transportdata.tw/auth/realms/TDXConnect/protocol/openid-connect/token"
               payload = urllib.parse.urlencode({
                   "grant_type": "client_credentials",
@@ -95,19 +111,16 @@ jobs:
                       json.dump({
                           "access_token": token,
                           "expires_at": now_ts + expires_in,
-                          "updated_at": datetime.datetime.now().isoformat()
+                          "updated_date": date_str,
+                          "updated_at": now_utc8.isoformat()
                       }, f, indent=2)
-                  print(f"  -> 全新 Token 申請成功並存入: {token_cache_path}")
+                  print(f"  -> 全新 Token 儲存成功: {token_cache_path}")
 
           # -------------------------------------------------------------
-          # 2. 台北時間 (UTC+8) 計算與落地寫入
+          # 2. 資料擷取與寫入工具
           # -------------------------------------------------------------
-          now_utc8 = datetime.datetime.now(datetime.timezone.utc).astimezone(datetime.timezone(datetime.timedelta(hours=8)))
-          date_str = now_utc8.strftime("%Y-%m-%d")
-          time_str = now_utc8.strftime("%Y%m%d_%H%M")
-
           def fetch_and_write(category, api_url, filename_prefix):
-              print(f"[*] 正在抓取 TDX {category} (已啟用 Gzip 傳輸壓縮)...")
+              print(f"[*] 正在抓取 TDX {category} (Gzip 壓縮)...")
               api_req = urllib.request.Request(
                   api_url,
                   headers={
@@ -118,13 +131,9 @@ jobs:
               )
               with urllib.request.urlopen(api_req, timeout=20, context=ssl_ctx) as r:
                   compressed_data = r.read()
-                  
-                  # 檢查回應標頭是否為 Gzip，並在記憶體中自動解壓縮
                   content_encoding = r.headers.get("Content-Encoding", "").lower()
                   if "gzip" in content_encoding:
                       raw_data = gzip.decompress(compressed_data)
-                      wire_size_kb = len(compressed_data) / 1024
-                      print(f"  -> 網路傳輸體積: {wire_size_kb:.2f} KB (Gzip 壓縮生效)")
                   else:
                       raw_data = compressed_data
 
@@ -137,22 +146,25 @@ jobs:
 
               records_count = len(json.loads(raw_data.decode("utf-8")))
               file_size_kb = os.path.getsize(file_path) / 1024
-              print(f"  [OK] {category} 儲存完成: {file_path}")
-              print(f"       筆數: {records_count} 筆 | 落盤大小: {file_size_kb:.2f} KB")
+              print(f"  [OK] {category} 落盤成功: {file_path}")
+              print(f"       筆數: {records_count} 筆 | 檔案大小: {file_size_kb:.2f} KB")
 
           # -------------------------------------------------------------
-          # 3. 執行抓取任務 (車位每 5 分鐘；站位當日唯一)
+          # 3. 每小時執行：即時動態車位
           # -------------------------------------------------------------
           print("[2/3] 處理動態即時車位 (Availability)...")
           fetch_and_write("availability", "https://tdx.transportdata.tw/api/basic/v2/Bike/Availability/City/Taipei?%24format=JSON", "availability")
 
+          # -------------------------------------------------------------
+          # 4. 每日執行一次：靜態站位資料
+          # -------------------------------------------------------------
           print("[3/3] 處理靜態站位資料 (Station)...")
           station_today_dir = os.path.join(BASE_DIR, "raw", "station", date_str)
           existing_station_files = glob.glob(os.path.join(station_today_dir, "*.json"))
 
           if existing_station_files and not force_station:
               print(f"  [SKIP] 今日 ({date_str}) 已備份過靜態站位: {existing_station_files[0]}")
-              print("         靜態站位一天僅抓取一次，跳過本次請求以節省配額。")
+              print("         靜態站位每日僅抓取一次，跳過本次請求。")
           else:
               fetch_and_write("station", "https://tdx.transportdata.tw/api/basic/v2/Bike/Station/City/Taipei?%24format=JSON", "station")
 
