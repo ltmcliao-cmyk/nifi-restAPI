@@ -1,0 +1,61 @@
+name: NiFi Full Pipeline Diagnostics & Monitor
+
+# 觸發條件：定期 Cron 自動執行 或 手動點擊 (workflow_dispatch)
+on:
+  schedule:
+    - cron: '*/15 * * * *'  # 每 15 分鐘定期執行一次快照擷取 [1]
+  workflow_dispatch:        # 支援 GitHub 頁面手動觸發執行
+
+# 權限配置：允許 Workflow 推送內容與更新 GitHub Pages / Artifacts [1]
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+jobs:
+  collect-nifi-context:
+    name: Run Universal NiFi Diagnostic Collector
+    # 指定於本機 Self-Hosted Runner 執行，方能存取本機 localhost:8080 容器 API [1]
+    runs-on: self-hosted
+
+    steps:
+      # 1. 檢出程式碼庫
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      # 2. 設置 Python 環境 (使用環境現有 Python)
+      - name: Set up Python Environment
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      # 3. 安裝必要依賴套件
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests nipyapi
+
+      # 4. 執行通用 Diagnostics 腳本 (呼叫 4 大端點並遞迴產出 JSON)
+      - name: Fetch NiFi Universal AI Context JSON
+        env:
+          NIFI_API_BASE: "http://localhost:8080/nifi-api"
+        run: |
+          python fetch_all_nifi_context.py
+
+      # 5. 上傳 JSON 報告為 Actions Artifact (供手動下載丟給 AI)
+      - name: Upload AI Context Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nifi-ai-context-report
+          path: nifi_full_ai_context.json
+          retention-days: 7
+
+      # 6. 自動 Commit 快照檔並推送到 GitHub (選擇性啟用)
+      - name: Commit and Push Diagnostic Snapshot
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add nifi_full_ai_context.json
+          git status
+          git commit -m "chore(monitor): update universal NiFi AI context snapshot [skip ci]" || echo "No changes to commit"
+          git push
