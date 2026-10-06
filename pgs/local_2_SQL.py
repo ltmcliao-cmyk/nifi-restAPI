@@ -67,7 +67,7 @@ def create_local_2_sql_pg(parent_pg, dbcp_service, input_dir="/tmp/input", file_
     # 3. 初始化 Process Group 內部的 JsonTreeReader Controller Service
     json_reader = init_json_reader(local_pg)
 
-    # 4. 建立 GetFile 處理器 (取代原有的 Input Port)
+    # 4. 建立 GetFile 處理器 (保留原始 ProcessorEntity 參照)
     get_file = nipyapi.canvas.create_processor(
         parent_pg=local_pg,
         processor=nipyapi.canvas.get_processor_type('GetFile'),
@@ -88,9 +88,8 @@ def create_local_2_sql_pg(parent_pg, dbcp_service, input_dir="/tmp/input", file_
             scheduling_period='10 sec'
         )
     )
-    get_file = nipyapi.canvas.get_processor(get_file.id)
 
-    # 5. 建立 RouteOnAttribute 處理器 (分流/過濾)
+    # 5. 建立 RouteOnAttribute 處理器 (保留原始 ProcessorEntity 參照)
     route_proc = nipyapi.canvas.create_processor(
         parent_pg=local_pg,
         processor=nipyapi.canvas.get_processor_type('RouteOnAttribute'),
@@ -107,10 +106,8 @@ def create_local_2_sql_pg(parent_pg, dbcp_service, input_dir="/tmp/input", file_
             auto_terminated_relationships=['unmatched']
         )
     )
-    # 重新獲取最新實體，同步 NiFi 生成的 'matched' relationship
-    route_proc = nipyapi.canvas.get_processor(route_proc.id)
 
-    # 6. 建立 PutDatabaseRecord 處理器 (寫入 PostgreSQL)
+    # 6. 建立 PutDatabaseRecord 處理器 (保留原始 ProcessorEntity 參照)
     put_db = nipyapi.canvas.create_processor(
         parent_pg=local_pg,
         processor=nipyapi.canvas.get_processor_type('PutDatabaseRecord'),
@@ -132,10 +129,8 @@ def create_local_2_sql_pg(parent_pg, dbcp_service, input_dir="/tmp/input", file_
             auto_terminated_relationships=['success', 'failure', 'retry']
         )
     )
-    # 重新獲取標準實體，確保 target 物件型態符合 create_connection 預期
-    put_db = nipyapi.canvas.get_processor(put_db.id)
 
-    # 7. 連接各 Processor 資料流 (GetFile -> RouteOnAttribute -> PutDatabaseRecord)
+    # 7. 連接各 Processor 資料流 (使用 create_processor 產生的原始 Entity 物件)
     nipyapi.canvas.create_connection(
         source=get_file,
         target=route_proc,
@@ -143,8 +138,14 @@ def create_local_2_sql_pg(parent_pg, dbcp_service, input_dir="/tmp/input", file_
         name="Files to Route"
     )
 
+    # 若需要同步 relationship 結構，直接提取最新物件結構或傳入原始 entity
+    # 重新獲取時透過 canvas.get_processor 並指定 identifier
+    updated_route = nipyapi.canvas.get_processor(route_proc.id, identifier_type='id')
+    if isinstance(updated_route, list):
+        updated_route = updated_route[0]
+
     nipyapi.canvas.create_connection(
-        source=route_proc,
+        source=updated_route,
         target=put_db,
         relationships=['matched'],
         name="Matched to SQL"
