@@ -14,10 +14,11 @@ def main():
     nifi_host = os.getenv('NIFI_HOST', 'http://localhost:8080')
     nipyapi.config.nifi_config.host = f"{nifi_host.rstrip('/')}/nifi-api"
 
-    # 2. 取得 Root PG
-    root_pg = nipyapi.canvas.get_process_group('root')
+    # 2. 取得 Root PG（透過 get_root_pg_id 避免名稱比對為 None 的陷阱）
+    root_id = nipyapi.canvas.get_root_pg_id()
+    root_pg = nipyapi.canvas.get_process_group(root_id, identifier_type='id')
 
-    # 3. 資料庫連線配置 (傳入 local_2_sql 由內部專屬建立與啟用)
+    # 3. 資料庫連線配置 (由 local_2_sql 內部專屬建立與啟用，維持同層 Scope)
     db_config = {
         'url': 'jdbc:postgresql://postgres:5432/pipeline_db',
         'driver_class': 'org.postgresql.Driver',
@@ -29,10 +30,11 @@ def main():
     # 4. 指定容器內的唯讀掛載路徑
     raw_data_dir = "/opt/nifi/nifi-current/data/raw"
 
-    # 5. 建立 Local_2_SQL 拓樸
+    # 5. 建立 Local_2_SQL 拓樸（顯式指定 target table）
     local_pg = local_2_SQL.create_local_2_sql_pg(
         parent_pg=root_pg,
         db_config=db_config,
+        table_name="raw_bike_availability",
         input_dir=raw_data_dir,
         file_filter=".*\\.json"
     )
@@ -40,7 +42,7 @@ def main():
     # 6. 路由保留介面
     routes.build_inter_pg_routes()
 
-    # 7. 一鍵啟動全拓樸
+    # 7. 一鍵啟動全拓樸（此時內部的 DBCP 與 JsonTreeReader 已預先 ENABLED，Processor 可直接無痛 RUNNING）
     nipyapi.canvas.schedule_process_group(local_pg.id, scheduled=True)
     print(f"[OK] Successfully initialized and started Process Group '{local_pg.component.name}' (ID: {local_pg.id})")
 
