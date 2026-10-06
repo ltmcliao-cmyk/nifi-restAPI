@@ -88,6 +88,7 @@ def create_local_2_sql_pg(parent_pg, dbcp_service, input_dir="/tmp/input", file_
             scheduling_period='10 sec'
         )
     )
+    get_file = nipyapi.canvas.get_processor(get_file.id)
 
     # 5. 建立 RouteOnAttribute 處理器 (分流/過濾)
     route_proc = nipyapi.canvas.create_processor(
@@ -106,7 +107,7 @@ def create_local_2_sql_pg(parent_pg, dbcp_service, input_dir="/tmp/input", file_
             auto_terminated_relationships=['unmatched']
         )
     )
-    # 重新獲取最新實體，確保 NiFi 生成的 'matched' Relationship 完成同步
+    # 重新獲取最新實體，同步 NiFi 生成的 'matched' relationship
     route_proc = nipyapi.canvas.get_processor(route_proc.id)
 
     # 6. 建立 PutDatabaseRecord 處理器 (寫入 PostgreSQL)
@@ -131,6 +132,8 @@ def create_local_2_sql_pg(parent_pg, dbcp_service, input_dir="/tmp/input", file_
             auto_terminated_relationships=['success', 'failure', 'retry']
         )
     )
+    # 重新獲取標準實體，確保 target 物件型態符合 create_connection 預期
+    put_db = nipyapi.canvas.get_processor(put_db.id)
 
     # 7. 連接各 Processor 資料流 (GetFile -> RouteOnAttribute -> PutDatabaseRecord)
     nipyapi.canvas.create_connection(
