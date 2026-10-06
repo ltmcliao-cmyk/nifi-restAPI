@@ -20,7 +20,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: 安裝相依套件
-        run: pip3 install --no-cache-dir "nipyapi~=0.18.0" "pyyaml>=5.4.1"
+        run: pip3 install --user --no-cache-dir "nipyapi~=0.18.0" "pyyaml>=5.4.1"
 
       - name: 執行本機拓撲部署
         env:
