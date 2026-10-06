@@ -83,6 +83,9 @@ def create_local_2_sql_pg(parent_pg, position=(100.0, 100.0), db_controller_id=N
         )
     )
 
+    # 關鍵修正：重新取得更新後的 processor 物件，載入動態產生的 is_station / is_availability 關聯
+    route_on_attr = nipyapi.canvas.get_processor(route_on_attr.id, 'id')
+
     # --------------------------------------------------------------------------
     # 5. Processor 3: PutSQL for Station (寫入 raw_bike_station)
     # --------------------------------------------------------------------------
