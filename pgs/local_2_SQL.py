@@ -14,11 +14,15 @@ def create_local_2_sql_pg(parent_pg, position=(100.0, 100.0), db_controller_id=N
     Args:
         parent_pg (ProcessGroupEntity): 父層 Process Group 實例。
         position (tuple): 在 NiFi Canvas 上的坐標。
-        db_controller_id (str, optional): DBCPConnectionPool 服務 ID。
+        db_controller_id (str, optional): DBCPConnectionPool 服務 ID 或 Controller 實例。
 
     Returns:
         ProcessGroupEntity: 建置與串接完成的 local_2_SQL Process Group 實例。
     """
+    # 支援傳入 ControllerServiceEntity 或純 ID 字串
+    if db_controller_id and hasattr(db_controller_id, 'id'):
+        db_controller_id = db_controller_id.id
+
     # 1. 建立獨立的 Process Group
     local_pg = nipyapi.canvas.create_process_group(
         parent_pg=parent_pg,
@@ -159,3 +163,15 @@ def create_local_2_sql_pg(parent_pg, position=(100.0, 100.0), db_controller_id=N
     )
 
     return local_pg
+
+
+def build_local_2_sql_pg(parent_pg, dbcp_service, position=(100.0, 100.0)):
+    """
+    提供給 main.py 呼叫的轉接函式，同時相容 dbcp_service 實例物件與 ID。
+    """
+    controller_id = dbcp_service.id if hasattr(dbcp_service, 'id') else dbcp_service
+    return create_local_2_sql_pg(
+        parent_pg=parent_pg,
+        position=position,
+        db_controller_id=controller_id
+    )
