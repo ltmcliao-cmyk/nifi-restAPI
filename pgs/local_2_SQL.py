@@ -118,7 +118,7 @@ def create_local_2_sql_pg(parent_pg, dbcp_service, input_dir="/opt/nifi/nifi-cur
         )
     )
 
-    # 7. 建立 PutDatabaseRecord 處理器 (綁定已啟用的 dbcp_service 與 json_reader)
+    # 7. 建立 PutDatabaseRecord 處理器 (使用正確的內部屬性鍵值)
     put_db = nipyapi.canvas.create_processor(
         parent_pg=local_pg,
         processor=nipyapi.canvas.get_processor_type('PutDatabaseRecord'),
@@ -129,18 +129,13 @@ def create_local_2_sql_pg(parent_pg, dbcp_service, input_dir="/opt/nifi/nifi-cur
         put_db,
         nipyapi.nifi.ProcessorConfigDTO(
             properties={
-                'Database Connection Pooling Service': dbcp_service.id,
                 'put-db-record-dps': dbcp_service.id,
-                'Record Reader': json_reader.id,
-                'record-reader': json_reader.id,
-                'Statement Type': 'INSERT',
-                'statement-type': 'INSERT',
-                'Table Name': 'raw_bike_availability',
-                'table-name': 'raw_bike_availability',
-                'Schema Name': 'public',
-                'schema-name': 'public',
-                'Translate Field Names': 'true',
-                'Unmatched Field Behavior': 'Ignore Unmatched Fields'
+                'put-db-record-record-reader': json_reader.id,
+                'put-db-record-statement-type': 'INSERT',
+                'put-db-record-table-name': 'raw_bike_availability',
+                'put-db-record-schema-name': 'public',
+                'put-db-record-translate-field-names': 'true',
+                'put-db-record-unmatched-field-behavior': 'Ignore Unmatched Fields'
             },
             auto_terminated_relationships=['success', 'failure', 'retry']
         )
