@@ -40,9 +40,9 @@ def purge_process_group_safely(pg_entity):
         print(f"Warning: Failed to purge old process group {pg_id}: {e}")
 
 
-def create_local_2_sql_pg(parent_pg, dbcp_service, input_dir="/tmp/input", file_filter=".*\\.json"):
+def create_local_2_sql_pg(parent_pg, dbcp_service, input_dir=r"C:\Users\lutomica\Desktop\Dana mission\data\raw", file_filter=".*\\.json"):
     """
-    建立 Local_2_SQL Process Group，使用 GetFile 讀取檔案並寫入 PostgreSQL。
+    建立 Local_2_SQL Process Group，使用 GetFile 遞迴讀取本地資料夾並寫入 PostgreSQL。
     
     :param parent_pg: 上層 Process Group (例如 Root Process Group)
     :param dbcp_service: 外部已初始化的 DBCPConnectionPool 服務實例
@@ -67,7 +67,7 @@ def create_local_2_sql_pg(parent_pg, dbcp_service, input_dir="/tmp/input", file_
     # 3. 初始化 Process Group 內部的 JsonTreeReader Controller Service
     json_reader = init_json_reader(local_pg)
 
-    # 4. 建立 GetFile 處理器 (保留原始 ProcessorEntity 參照)
+    # 4. 建立 GetFile 處理器 (開啟 Recurse Subdirectories 支援子目錄遞迴)
     get_file = nipyapi.canvas.create_processor(
         parent_pg=local_pg,
         processor=nipyapi.canvas.get_processor_type('GetFile'),
@@ -80,16 +80,18 @@ def create_local_2_sql_pg(parent_pg, dbcp_service, input_dir="/tmp/input", file_
             properties={
                 'Input Directory': input_dir,
                 'File Filter': file_filter,
-                'Keep Source File': 'false',
-                'Recurse Subdirectories': 'true',
-                'Minimum File Age': '0 sec'
+                'Keep Source File': 'true',          # 設為 true 避免本地原始 JSON 檔被 NiFi 刪除
+                'Recurse Subdirectories': 'true',    # 關鍵：自動讀取 raw 目錄下所有子資料夾內的檔案
+                'Minimum File Age': '0 sec',
+                'Polling Interval': '10 sec',
+                'Ignore Hidden Files': 'true'
             },
             scheduling_strategy='TIMER_DRIVEN',
             scheduling_period='10 sec'
         )
     )
 
-    # 5. 建立 RouteOnAttribute 處理器 (保留原始 ProcessorEntity 參照)
+    # 5. 建立 RouteOnAttribute 處理器 (分流/過濾)
     route_proc = nipyapi.canvas.create_processor(
         parent_pg=local_pg,
         processor=nipyapi.canvas.get_processor_type('RouteOnAttribute'),
@@ -107,7 +109,7 @@ def create_local_2_sql_pg(parent_pg, dbcp_service, input_dir="/tmp/input", file_
         )
     )
 
-    # 6. 建立 PutDatabaseRecord 處理器 (保留原始 ProcessorEntity 參照)
+    # 6. 建立 PutDatabaseRecord 處理器 (寫入 PostgreSQL)
     put_db = nipyapi.canvas.create_processor(
         parent_pg=local_pg,
         processor=nipyapi.canvas.get_processor_type('PutDatabaseRecord'),
@@ -130,7 +132,7 @@ def create_local_2_sql_pg(parent_pg, dbcp_service, input_dir="/tmp/input", file_
         )
     )
 
-    # 7. 連接各 Processor 資料流 (使用 create_processor 產生的原始 Entity 物件)
+    # 7. 連接各 Processor 資料流 (使用原始 Entity 避免型態識別失敗)
     nipyapi.canvas.create_connection(
         source=get_file,
         target=route_proc,
@@ -138,8 +140,7 @@ def create_local_2_sql_pg(parent_pg, dbcp_service, input_dir="/tmp/input", file_
         name="Files to Route"
     )
 
-    # 若需要同步 relationship 結構，直接提取最新物件結構或傳入原始 entity
-    # 重新獲取時透過 canvas.get_processor 並指定 identifier
+    # 重新獲取最新的 RouteOnAttribute 實體以同步動態生成的 matched relationship
     updated_route = nipyapi.canvas.get_processor(route_proc.id, identifier_type='id')
     if isinstance(updated_route, list):
         updated_route = updated_route[0]
