@@ -2,14 +2,14 @@
 """
 pgs/local_2_SQL.py
 建置 Local_2_SQL Process Group 與 PostgreSQL 寫入流程。
-1. ListFile + FetchFile 架構安全讀取 Raw JSON。
-2. 自動銜接已啟用的 DBCP 連線池與 JsonTreeReader。
-3. 自動排程全流程，無需手動點擊啟用或啟動。
+1. ListFile + FetchFile 安全讀取 Raw JSON。
+2. DBCP 與 JsonTreeReader 建立在同一 Process Group 內部，確保 100% 成功綁定。
+3. 自動啟用 Controller Services 並自動啟動全拓樸。
 """
 
 import time
 import nipyapi
-from infra import init_json_reader
+from infra import init_json_reader, init_dbcp_pool
 
 
 def purge_process_group_safely(pg_entity):
@@ -39,9 +39,10 @@ def purge_process_group_safely(pg_entity):
         print(f"Warning: Failed to purge old process group {pg_id}: {e}")
 
 
-def create_local_2_sql_pg(parent_pg, dbcp_service, input_dir="/opt/nifi/nifi-current/data/raw", file_filter=".*\\.json"):
+def create_local_2_sql_pg(parent_pg, db_config, input_dir="/opt/nifi/nifi-current/data/raw", file_filter=".*\\.json"):
     """
     建立 Local_2_SQL Process Group。
+    傳入 db_config，直接在該 Process Group 內部初始化並啟用專屬的 DBCP 連線池。
     """
     pg_name = "Local_2_SQL"
 
@@ -51,15 +52,16 @@ def create_local_2_sql_pg(parent_pg, dbcp_service, input_dir="/opt/nifi/nifi-cur
         if pg.component.name == pg_name:
             purge_process_group_safely(pg)
 
-    # 2. 建立新群組
+    # 2. 建立新 Process Group
     local_pg = nipyapi.canvas.create_process_group(
         parent_pg=parent_pg,
         new_pg_name=pg_name,
         location=(400, 400)
     )
 
-    # 3. 初始化內部 JsonTreeReader
+    # 3. 在同一 PG 內初始化 JsonTreeReader 與 DBCP 連線池 (徹底解決跨層無法綁定問題)
     json_reader = init_json_reader(local_pg)
+    dbcp_service = init_dbcp_pool(local_pg, db_config)
 
     # 4. 建立 ListFile 處理器
     list_file = nipyapi.canvas.create_processor(
@@ -82,7 +84,7 @@ def create_local_2_sql_pg(parent_pg, dbcp_service, input_dir="/opt/nifi/nifi-cur
         )
     )
 
-    # 5. 建立 FetchFile 處理器 (唯讀讀取)
+    # 5. 建立 FetchFile 處理器
     fetch_file = nipyapi.canvas.create_processor(
         parent_pg=local_pg,
         processor=nipyapi.canvas.get_processor_type('FetchFile'),
@@ -118,18 +120,7 @@ def create_local_2_sql_pg(parent_pg, dbcp_service, input_dir="/opt/nifi/nifi-cur
         )
     )
 
-    # 7. 建立 PutDatabaseRecord 處理器
-    # 預防 Scope 問題：強制全域搜尋正確的 PostgreSQL DBCP ID
-    actual_dbcp_id = dbcp_service.id
-    try:
-        root_id = nipyapi.canvas.get_root_pg_id()
-        for svc in nipyapi.canvas.list_all_controllers(root_id):
-            if "DBCP" in svc.component.name:
-                actual_dbcp_id = svc.id
-                break
-    except Exception:
-        pass
-
+    # 7. 建立 PutDatabaseRecord 處理器 (同層引用已啟用的 Controller Services)
     put_db = nipyapi.canvas.create_processor(
         parent_pg=local_pg,
         processor=nipyapi.canvas.get_processor_type('PutDatabaseRecord'),
@@ -140,16 +131,13 @@ def create_local_2_sql_pg(parent_pg, dbcp_service, input_dir="/opt/nifi/nifi-cur
         put_db,
         nipyapi.nifi.ProcessorConfigDTO(
             properties={
-                # 雙管齊下：同時設定內部 Descriptor Key 與 Display Name
-                'put-db-record-dps': actual_dbcp_id,
-                'Database Connection Pooling Service': actual_dbcp_id,
-                
-                'put-db-record-record-reader': json_reader.id,
-                'put-db-record-statement-type': 'INSERT',
-                'put-db-record-table-name': 'raw_bike_availability',
-                'put-db-record-schema-name': 'public',
-                'put-db-record-translate-field-names': 'true',
-                'put-db-record-unmatched-field-behavior': 'Ignore Unmatched Fields'
+                'Database Connection Pooling Service': dbcp_service.id,
+                'Record Reader': json_reader.id,
+                'Statement Type': 'INSERT',
+                'Table Name': 'raw_bike_availability',
+                'Schema Name': 'public',
+                'Translate Field Names': 'true',
+                'Unmatched Field Behavior': 'Ignore Unmatched Fields'
             },
             auto_terminated_relationships=['success', 'failure', 'retry']
         )
