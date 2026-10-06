@@ -1,10 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-main.py - 純粹的系統調度器
-設計邏輯：
-1. 第一性原理：main.py 的唯一職責是「順序調度」，不關心 PG 內部連線細節。
-2. 奧卡姆剃刀：移除多餘中介傳參，調度流程一目瞭然。
-3. 流程導向：[Endpoint -> Infra -> PG Build -> Inter-PG Routes -> Schedule]。
+main.py - 系統調度器
 """
 
 import os
@@ -15,14 +11,14 @@ import routes
 
 
 def main():
-    # 1. 設定 NiFi API 連線端點 (優先讀取環境變數 NIFI_HOST)
+    # 1. 連線設定
     nifi_host = os.getenv('NIFI_HOST', 'http://localhost:8080')
     nipyapi.config.nifi_config.host = f"{nifi_host.rstrip('/')}/nifi-api"
 
-    # 2. 獲取 Canvas Root Process Group
+    # 2. 取得 Root PG
     root_pg = nipyapi.canvas.get_process_group('root')
 
-    # 3. 載入 Infra (建置 PostgreSQL DBCP 連線池於 Root PG)
+    # 3. 載入並啟用 PostgreSQL DBCP (精準填入 5 個核心參數)
     db_config = {
         'url': 'jdbc:postgresql://postgres:5432/pipeline_db',
         'driver_class': 'org.postgresql.Driver',
@@ -32,10 +28,10 @@ def main():
     }
     dbcp_service = infra.init_dbcp_pool(root_pg, db_config)
 
-    # 4. 指定 NiFi 容器內部對應的掛載路徑 (配合 compose 的 ./data/raw 映射)
+    # 4. 指定容器內的唯讀掛載路徑
     raw_data_dir = "/opt/nifi/nifi-current/data/raw"
 
-    # 5. 載入 PG (建立 local_2_SQL 業務邏輯及其內部 FlowFile 拓樸)
+    # 5. 建立 Local_2_SQL 拓樸
     local_pg = local_2_SQL.create_local_2_sql_pg(
         parent_pg=root_pg,
         dbcp_service=dbcp_service,
@@ -43,10 +39,10 @@ def main():
         file_filter=".*\\.json"
     )
 
-    # 6. 執行跨 PG (Port-to-Port) 拓樸路由 (目前為單一 PG 預留介面)
+    # 6. 路由保留介面
     routes.build_inter_pg_routes()
 
-    # 7. 啟動 Process Group 開始運作
+    # 7. 一鍵啟動全拓樸 (Controller Service 已先行啟用，此處將全綠燈運行)
     nipyapi.canvas.schedule_process_group(local_pg.id, scheduled=True)
     print(f"[OK] Successfully initialized and started Process Group '{local_pg.component.name}' (ID: {local_pg.id})")
 
