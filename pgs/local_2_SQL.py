@@ -2,8 +2,7 @@
 """
 pgs/local_2_SQL.py
 建置 Local_2_SQL Process Group 與 PostgreSQL 寫入流程。
-包含舊群組安全清理（先停止 Processor 與停用 Controller Service）、
-建立 Input Port、RouteOnAttribute 分流以及 PutDatabaseRecord 寫入。
+包含舊群組安全清理、建立 Input Port、RouteOnAttribute 分流以及 PutDatabaseRecord 寫入。
 """
 import time
 import nipyapi
@@ -61,8 +60,9 @@ def build_local_2_sql_pg(parent_pg, dbcp_service):
 
     # 3. 初始化 Controller Services (JsonTreeReader)
     json_reader_service = init_json_reader(local_pg)
+    reader_id = json_reader_service.id if hasattr(json_reader_service, 'id') else json_reader_service
 
-    # 4. 建立 Input Port (提供 state 與 position 參數)
+    # 4. 建立 Input Port
     input_port = nipyapi.canvas.create_port(
         pg_id=local_pg.id,
         port_type='INPUT_PORT',
@@ -77,8 +77,12 @@ def build_local_2_sql_pg(parent_pg, dbcp_service):
         parent_pg=local_pg,
         processor=route_processor_type,
         location=(400.0, 200.0),
-        name="Route_TDX_Type",
-        config=nipyapi.nifi.ProcessorConfigDTO(
+        name="Route_TDX_Type"
+    )
+
+    nipyapi.canvas.update_processor(
+        route_on_attr,
+        nipyapi.nifi.ProcessorConfigDTO(
             properties={
                 'Routing Strategy': 'Route to Property name',
                 'is_station': '${filename:contains("Station")}',
@@ -88,7 +92,7 @@ def build_local_2_sql_pg(parent_pg, dbcp_service):
         )
     )
 
-    # 6. 連接 Input Port -> RouteOnAttribute
+    # 連接 Input Port -> RouteOnAttribute
     nipyapi.canvas.create_connection(
         source=input_port,
         target=route_on_attr
@@ -97,52 +101,59 @@ def build_local_2_sql_pg(parent_pg, dbcp_service):
     # 刷新 RouteOnAttribute 物件以載入動態 relationship
     route_on_attr = nipyapi.canvas.get_processor(route_on_attr.id, identifier_type='id')
 
-    # 7. 建立 PutDatabaseRecord 處理器
+    # 6. 建立 PutDatabaseRecord 處理器
     put_db_type = nipyapi.canvas.get_processor_type('PutDatabaseRecord')
 
-    # Station
+    # PutDatabaseRecord 通用屬性配置
+    common_db_properties = {
+        'record-reader': reader_id,
+        'Database Connection Pooling Service': dbcp_id,
+        'statement-type': 'INSERT',
+        'db-type': 'PostgreSQL',
+        'schema-name': 'public',
+        'Translate Field Names': 'true',
+        'Unmatched Field Behavior': 'Ignore Unmatched Fields'
+    }
+
+    # Station 寫入處理器
     put_db_station = nipyapi.canvas.create_processor(
         parent_pg=local_pg,
         processor=put_db_type,
         location=(800.0, 100.0),
-        name="PutDatabaseRecord_Station",
-        config=nipyapi.nifi.ProcessorConfigDTO(
-            properties={
-                'record-reader': json_reader_service.id,
-                'Database Connection Pooling Service': dbcp_id,
-                'db-type': 'PostgreSQL',
-                'statement-type': 'INSERT',
-                'table-name': 'raw_station',
-                'schema-name': 'public',
-                'Translate Field Names': 'true',
-                'Unmatched Field Behavior': 'Ignore Unmatched Fields'
-            },
+        name="PutDatabaseRecord_Station"
+    )
+
+    station_props = common_db_properties.copy()
+    station_props['table-name'] = 'raw_station'
+
+    nipyapi.canvas.update_processor(
+        put_db_station,
+        nipyapi.nifi.ProcessorConfigDTO(
+            properties=station_props,
             auto_terminated_relationships=['success', 'failure', 'retry']
         )
     )
 
-    # Availability
+    # Availability 寫入處理器
     put_db_avail = nipyapi.canvas.create_processor(
         parent_pg=local_pg,
         processor=put_db_type,
         location=(800.0, 300.0),
-        name="PutDatabaseRecord_Availability",
-        config=nipyapi.nifi.ProcessorConfigDTO(
-            properties={
-                'record-reader': json_reader_service.id,
-                'Database Connection Pooling Service': dbcp_id,
-                'db-type': 'PostgreSQL',
-                'statement-type': 'INSERT',
-                'table-name': 'raw_availability',
-                'schema-name': 'public',
-                'Translate Field Names': 'true',
-                'Unmatched Field Behavior': 'Ignore Unmatched Fields'
-            },
+        name="PutDatabaseRecord_Availability"
+    )
+
+    avail_props = common_db_properties.copy()
+    avail_props['table-name'] = 'raw_availability'
+
+    nipyapi.canvas.update_processor(
+        put_db_avail,
+        nipyapi.nifi.ProcessorConfigDTO(
+            properties=avail_props,
             auto_terminated_relationships=['success', 'failure', 'retry']
         )
     )
 
-    # 8. 建立連接線
+    # 7. 建立連接線
     nipyapi.canvas.create_connection(
         source=route_on_attr,
         target=put_db_station,
