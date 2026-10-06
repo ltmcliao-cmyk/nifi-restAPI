@@ -85,6 +85,6 @@ def init_json_reader(parent_pg):
 
     # 3. 確保 Controller Service 已啟用
     if target_service.component.state != 'ENABLED':
-        nipyapi.canvas.schedule_controller_service(target_service, scheduled=True)
+        nipyapi.canvas.schedule_controller(target_service, scheduled=True)
 
     return target_service
