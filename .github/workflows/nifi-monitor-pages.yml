@@ -1,59 +1,35 @@
 name: Fetch NiFi Context (Manual Trigger)
 
-# 僅允許在 GitHub Actions 頁面手動點擊「Run workflow」觸發
+# 僅手動點選 Run workflow 觸發
 on:
   workflow_dispatch:
 
-# 最小權限：僅需讀取程式碼
+# 最小權限原則
 permissions:
   contents: read
 
 jobs:
-  fetch-and-display-json:
-    runs-on: ubuntu-latest
-    # 若你的 NiFi 運行在內網本機，請將上一行改為你的 self-hosted runner，例如：
-    # runs-on: [self-hosted, linux]
+  fetch-nifi-status:
+    # 🎯 精確指定你的自託管 Windows Runner (company-runner)
+    runs-on: [self-hosted, Windows, X64]
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
       - name: Install Python Dependencies
+        # Windows Runner 預設使用本機安裝好的 Python 環境
         run: |
           python -m pip install --upgrade pip
-          pip install requests urllib3
+          python -m pip install requests urllib3
 
-      - name: Run Fetch NiFi Context Script
+      - name: Execute Fetch Script
+        # 執行 Python 腳本：抓取資料、產出 JSON、自動寫入 Action 頁面 Summary
         run: |
-          echo "執行 NiFi Context 擷取腳本..."
           python fetch_all_nifi_context.py
 
-      - name: Display JSON on Action Summary Page
-        run: |
-          echo "### 📊 NiFi 狀態回傳結果 (JSON)" >> $GITHUB_STEP_SUMMARY
-          echo "以下為本次手動執行的完整回傳內容，點擊展開即可查看或一鍵複製：" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          # 檢查檔案大小（GitHub Step Summary 限制最大為 1024KB）
-          FILE_SIZE=$(wc -c < nifi_context.json)
-          if [ $FILE_SIZE -gt 900000 ]; then
-            echo "> ⚠️ **注意**：JSON 檔案超過 900KB，超出 GitHub Summary 頁面渲染上限，請直接至最下方下載 Artifact。" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "<details><summary><b>點擊展開完整 JSON 內容</b></summary>" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo '```json' >> $GITHUB_STEP_SUMMARY
-            cat nifi_context.json >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
-            echo "</details>" >> $GITHUB_STEP_SUMMARY
-          fi
-
-      - name: Upload Context JSON Artifact
+      - name: Upload JSON Artifact
+        # 上傳一份 Artifact 作為備份，可於 Action 頁面底部隨時下載
         uses: actions/upload-artifact@v4
         with:
           name: nifi-context-report
