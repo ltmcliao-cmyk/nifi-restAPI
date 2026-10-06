@@ -2,11 +2,10 @@
 """
 pgs/local_2_SQL.py
 建置 Local_2_SQL Process Group 與 PostgreSQL 寫入流程。
-採用工業標準 ListFile + FetchFile 架構：
+採用 ListFile + FetchFile 架構：
 1. 嚴格保護 Raw Data，絕不刪除或移動原始檔案。
-2. 支援 Docker 容器 :ro 唯讀掛載。
-3. 自動遞迴掃描子資料夾，並透過 State 增量追蹤避免重複抓取。
-4. 完整相容 NiFi 1.12.1 PutDatabaseRecord 內部 Descriptor 命名規則。
+2. 完美支援 Docker 容器 :ro 唯讀掛載。
+3. 修正 NiFi 1.12.1 下 ListFile、FetchFile 與 PutDatabaseRecord 的屬性驗證錯誤。
 """
 
 import time
@@ -66,7 +65,7 @@ def create_local_2_sql_pg(parent_pg, dbcp_service, input_dir="/opt/nifi/nifi-cur
     # 3. 初始化 JsonTreeReader
     json_reader = init_json_reader(local_pg)
 
-    # 4. 建立 ListFile 處理器 (純粹掃描目錄並維持狀態，不碰實體檔案)
+    # 4. 建立 ListFile 處理器 (移除 NiFi 1.12.1 不支援的 Include Directed Relative Path)
     list_file = nipyapi.canvas.create_processor(
         parent_pg=local_pg,
         processor=nipyapi.canvas.get_processor_type('ListFile'),
@@ -80,15 +79,14 @@ def create_local_2_sql_pg(parent_pg, dbcp_service, input_dir="/opt/nifi/nifi-cur
                 'Input Directory': input_dir,
                 'Recurse Subdirectories': 'true',
                 'File Filter': file_filter,
-                'Minimum File Age': '0 sec',
-                'Include Directed Relative Path': 'true'
+                'Minimum File Age': '0 sec'
             },
             scheduling_strategy='TIMER_DRIVEN',
             scheduling_period='10 sec'
         )
     )
 
-    # 5. 建立 FetchFile 處理器 (安全讀取檔案內容，明確宣告不刪除原檔)
+    # 5. 建立 FetchFile 處理器 (Completion Strategy 為 None，移除不適用的 Move Conflict Strategy)
     fetch_file = nipyapi.canvas.create_processor(
         parent_pg=local_pg,
         processor=nipyapi.canvas.get_processor_type('FetchFile'),
@@ -100,8 +98,7 @@ def create_local_2_sql_pg(parent_pg, dbcp_service, input_dir="/opt/nifi/nifi-cur
         nipyapi.nifi.ProcessorConfigDTO(
             properties={
                 'File to Fetch': '${absolute.path}/${filename}',
-                'Completion Strategy': 'None',       # 完全不刪除、不移動原始資料
-                'Move Conflict Strategy': 'Do Not Rename'
+                'Completion Strategy': 'None'
             },
             auto_terminated_relationships=['not.found', 'permission.denied', 'failure']
         )
@@ -125,7 +122,7 @@ def create_local_2_sql_pg(parent_pg, dbcp_service, input_dir="/opt/nifi/nifi-cur
         )
     )
 
-    # 7. 建立 PutDatabaseRecord 處理器 (注入底層識別碼，修復 4 項必填驗證報錯)
+    # 7. 建立 PutDatabaseRecord 處理器 (使用 NiFi 1.12.1 嚴格標準屬性鍵名)
     put_db = nipyapi.canvas.create_processor(
         parent_pg=local_pg,
         processor=nipyapi.canvas.get_processor_type('PutDatabaseRecord'),
@@ -136,27 +133,11 @@ def create_local_2_sql_pg(parent_pg, dbcp_service, input_dir="/opt/nifi/nifi-cur
         put_db,
         nipyapi.nifi.ProcessorConfigDTO(
             properties={
-                # 1. Database Connection Pooling Service (底層 ID: put-db-record-dps)
-                'put-db-record-dps': dbcp_service.id,
                 'Database Connection Pooling Service': dbcp_service.id,
-
-                # 2. Record Reader (底層 ID: record-reader)
-                'record-reader': json_reader.id,
                 'Record Reader': json_reader.id,
-
-                # 3. Statement Type (底層 ID: statement-type)
-                'statement-type': 'INSERT',
                 'Statement Type': 'INSERT',
-
-                # 4. Table Name (底層 ID: table-name)
-                'table-name': 'raw_bike_availability',
                 'Table Name': 'raw_bike_availability',
-
-                # Schema 設定
-                'schema-name': 'public',
                 'Schema Name': 'public',
-
-                # 欄位映射與未匹配欄位行為
                 'Translate Field Names': 'true',
                 'Unmatched Field Behavior': 'Ignore Unmatched Fields'
             },
