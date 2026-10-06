@@ -1,109 +1,161 @@
-# -*- coding: utf-8 -*-
 """
-pgs/local_2_SQL.py - 本地機地端資料寫入 PostgreSQL 之 Process Group
-設計邏輯與精神：
-1. 第一性原理 (高內聚)：邊緣端 Pipeline 為一個獨立自治的 ETL 單元 [GetFile -> ConvertJSONToSQL -> PutSQL]。
-   將內部 Processor 宣告與 FlowFile 連線 (Connections) 一併歸入本模組建置，符合模組化開發。
-2. 操作第一層封裝：完全透過 nipyapi.canvas.create_process_group, create_processor, create_connection。
-3. 奧卡姆剃刀：由單一 build 函式完成該 PG 內部元件與拓樸的串接，並直接回傳 local_pg 物件。
+pgs/local_2_SQL.py
+建置 local_2_SQL Process Group：
+從本機掛載目錄遞迴讀取 TDX JSON（包含 station 與 availability），
+分流後以 JSONB 形式直接落盤至 PostgreSQL raw 表。
 """
 
 import nipyapi
 
-def build_local_2_sql_pg(parent_pg, dbcp_service, position=(400.0, 400.0)):
-    """
-    建置 local_2_SQL Process Group、內部 Processor 組件及其 FlowFile 路由拓樸。
+
+def create_local_2_sql_pg(parent_pg, position=(100.0, 100.0), db_controller_id=None):
+    """建置並配置 local_2_SQL Process Group。
 
     Args:
-        parent_pg (ProcessGroupEntity): 父層 Process Group (通常為 Root)。
-        dbcp_service (ControllerServiceEntity): 已啟用的 DBCP 連線池。
+        parent_pg (ProcessGroupEntity): 父層 Process Group 實例。
         position (tuple): 在 NiFi Canvas 上的坐標。
+        db_controller_id (str, optional): DBCPConnectionPool 服務 ID。
 
     Returns:
-        ProcessGroupEntity: 建置與串串完成的 local_2_SQL Process Group 實例。
+        ProcessGroupEntity: 建置與串接完成的 local_2_SQL Process Group 實例。
     """
     # 1. 建立獨立的 Process Group
     local_pg = nipyapi.canvas.create_process_group(
         parent_pg=parent_pg,
         new_pg_name="local_2_SQL",
         location=position,
-        comment="邊緣端 YouBike TDX JSON 資料落盤至 PostgreSQL"
+        comment="TDX JSON (Station & Availability) 落盤至 PostgreSQL JSONB RAW 表"
     )
 
-    # 2. 獲取 Processor 抽象型別 (第一層封裝)
+    # 2. 獲取 Processor 抽象型別
     getfile_type = nipyapi.canvas.get_processor_type('GetFile')
-    convert_json_type = nipyapi.canvas.get_processor_type('ConvertJSONToSQL')
+    route_type = nipyapi.canvas.get_processor_type('RouteOnAttribute')
     putsql_type = nipyapi.canvas.get_processor_type('PutSQL')
 
-    # 3. 實作 Processor 1: GetFile (讀取 fetch_tdx 產出的 JSON 檔案)
+    # --------------------------------------------------------------------------
+    # 3. Processor 1: GetFile (讀取 raw/ 下所有 JSON 檔案)
+    # --------------------------------------------------------------------------
     get_file = nipyapi.canvas.create_processor(
         parent_pg=local_pg,
         processor=getfile_type,
         location=(100.0, 100.0),
-        name="Ingest_TDX_JSON"
+        name="Ingest_TDX_All_JSON"
     )
+
     nipyapi.canvas.update_processor(
         get_file,
         nipyapi.nifi.ProcessorConfigDTO(
+            scheduling_period='10s',
             properties={
                 'Input Directory': '/opt/nifi/nifi-current/data/raw',
-                'File Filter': '.*\\.json$',
-                'Keep Source File': 'false'
+                'Recurse Subdirectories': 'true',          # 遍歷 station/ 與 availability/ 子目錄
+                'File Filter': r'.*\.json$',              # 同時接收 station 與 availability
+                'Keep Source File': 'true',               # compose 掛載為 :ro，必須保留檔案
+                'Minimum File Age': '5 sec'               # 避免讀取到尚未寫入完成的檔案
             },
-            scheduling_period='10s'
+            auto_terminated_relationships=[]
         )
     )
 
-    # 4. 實作 Processor 2: ConvertJSONToSQL (將 JSON 轉換為 SQL 語法)
-    convert_json = nipyapi.canvas.create_processor(
+    # --------------------------------------------------------------------------
+    # 4. Processor 2: RouteOnAttribute (根據檔名將 station 與 availability 分流)
+    # --------------------------------------------------------------------------
+    route_on_attr = nipyapi.canvas.create_processor(
         parent_pg=local_pg,
-        processor=convert_json_type,
+        processor=route_type,
         location=(100.0, 300.0),
-        name="Convert_JSON_to_SQL"
+        name="Route_By_Category"
     )
+
     nipyapi.canvas.update_processor(
-        convert_json,
+        route_on_attr,
         nipyapi.nifi.ProcessorConfigDTO(
             properties={
-                'JDBC Connection Pool': dbcp_service.id,
-                'Statement Type': 'INSERT',
-                'Table Name': 'youbike_station',
-                'Catalog Name': 'pipeline_db'
+                'Routing Strategy': 'Route to Property name',
+                'is_station': '${filename:startsWith("station")}',
+                'is_availability': '${filename:startsWith("availability")}'
             },
-            auto_terminated_relationships=['failure', 'original']
+            auto_terminated_relationships=['unmatched']
         )
     )
 
-    # 5. 實作 Processor 3: PutSQL (寫入 PostgreSQL)
-    put_sql = nipyapi.canvas.create_processor(
+    # --------------------------------------------------------------------------
+    # 5. Processor 3: PutSQL for Station (寫入 raw_bike_station)
+    # --------------------------------------------------------------------------
+    put_sql_station = nipyapi.canvas.create_processor(
         parent_pg=local_pg,
         processor=putsql_type,
-        location=(100.0, 500.0),
-        name="Execute_PutSQL"
+        location=(0.0, 500.0),
+        name="PutSQL_Raw_Station"
     )
+
+    station_properties = {
+        'SQL Statement': 'INSERT INTO raw_bike_station (payload) VALUES (?::jsonb);',
+        'Support Fragmented Transactions': 'false',
+        'Batch Size': '100'
+    }
+    if db_controller_id:
+        station_properties['JDBC Connection Pool'] = db_controller_id
+
     nipyapi.canvas.update_processor(
-        put_sql,
+        put_sql_station,
         nipyapi.nifi.ProcessorConfigDTO(
-            properties={
-                'JDBC Connection Pool': dbcp_service.id
-            },
-            auto_terminated_relationships=['success', 'retry', 'failure']
+            properties=station_properties,
+            auto_terminated_relationships=['success', 'failure', 'retry']
         )
     )
 
-    # 6. 內部 FlowFile 路由拓樸串接 (Ingest -> Transform -> Load)
-    nipyapi.canvas.create_connection(
-        source=get_file,
-        target=convert_json,
-        relationships=['success'],
-        name='Raw_JSON_Flow'
+    # --------------------------------------------------------------------------
+    # 6. Processor 4: PutSQL for Availability (寫入 raw_bike_availability)
+    # --------------------------------------------------------------------------
+    put_sql_avail = nipyapi.canvas.create_processor(
+        parent_pg=local_pg,
+        processor=putsql_type,
+        location=(250.0, 500.0),
+        name="PutSQL_Raw_Availability"
     )
 
+    avail_properties = {
+        'SQL Statement': 'INSERT INTO raw_bike_availability (payload) VALUES (?::jsonb);',
+        'Support Fragmented Transactions': 'false',
+        'Batch Size': '100'
+    }
+    if db_controller_id:
+        avail_properties['JDBC Connection Pool'] = db_controller_id
+
+    nipyapi.canvas.update_processor(
+        put_sql_avail,
+        nipyapi.nifi.ProcessorConfigDTO(
+            properties=avail_properties,
+            auto_terminated_relationships=['success', 'failure', 'retry']
+        )
+    )
+
+    # --------------------------------------------------------------------------
+    # 7. 建立連接線 (Connections)
+    # --------------------------------------------------------------------------
+    # GetFile -> RouteOnAttribute
     nipyapi.canvas.create_connection(
-        source=convert_json,
-        target=put_sql,
-        relationships=['sql'],
-        name='Prepared_SQL_Flow'
+        source=get_file,
+        target=route_on_attr,
+        relationships=['success'],
+        name="All_JSON_Stream"
+    )
+
+    # RouteOnAttribute (is_station) -> PutSQL_Raw_Station
+    nipyapi.canvas.create_connection(
+        source=route_on_attr,
+        target=put_sql_station,
+        relationships=['is_station'],
+        name="Station_Stream"
+    )
+
+    # RouteOnAttribute (is_availability) -> PutSQL_Raw_Availability
+    nipyapi.canvas.create_connection(
+        source=route_on_attr,
+        target=put_sql_avail,
+        relationships=['is_availability'],
+        name="Availability_Stream"
     )
 
     return local_pg
