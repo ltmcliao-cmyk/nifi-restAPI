@@ -32,13 +32,8 @@ def main():
     }
     dbcp_service = infra.init_dbcp_pool(root_pg, db_config)
 
-    # 4. 載入 PG (建立 local_2_SQL 業務邏輯及其內部 FlowFile 拓樸)
-    #    若 local_2_SQL 支援由 routes 管理的 Input Port，此處接收回傳實例
-    local_pg = local_2_SQL.build_local_2_sql_pg(root_pg, dbcp_service)
-    
-    # 若 local_2_SQL 同時回傳了 (local_pg, input_port) 則解包：
-    if isinstance(local_pg, tuple):
-        local_pg, input_port = local_pg
+    # 4. 載入 PG (呼叫 local_2_SQL.create_local_2_sql_pg 建立內部 GetFile -> PutDatabaseRecord 拓樸)
+    local_pg = local_2_SQL.create_local_2_sql_pg(root_pg, dbcp_service)
 
     # 5. 執行跨 PG (Port-to-Port) 拓樸路由 (目前為單一 PG 預留介面)
     routes.build_inter_pg_routes()
