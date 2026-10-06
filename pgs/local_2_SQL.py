@@ -129,7 +129,6 @@ def repair_and_run_put_database_record(local_pg, dbcp_svc, json_reader_svc, tabl
             nipyapi.canvas.schedule_processor(updated_proc, scheduled=True)
             print(f"[+] PutDatabaseRecord 啟動指令已送出！")
         except Exception as e:
-            # 若已經處於 STARTING/RUNNING 則安全忽略
             if "cannot be started because it is not stopped" in str(e):
                 print(f"[!] 處理器已在啟動中 (STARTING/RUNNING)，略過重複啟動。")
             else:
@@ -190,7 +189,6 @@ def create_local_2_sql_pg(parent_pg=None, *args, **kwargs):
 if __name__ == "__main__":
     nipyapi.config.nifi_config.host = "http://127.0.0.1:8080/nifi-api"
     pg = create_local_2_sql_pg()
-    # 防禦性排程整組 PG
     try:
         nipyapi.canvas.schedule_process_group(pg.id, scheduled=True)
     except Exception as e:
