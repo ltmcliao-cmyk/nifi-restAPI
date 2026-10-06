@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-pgs/local_2_SQL.py - Local_2_SQL 流程圖模組 (同層封閉保證生效版)
+pgs/local_2_SQL.py - Local_2_SQL 流程圖模組 (完整自動修復穩定版)
 """
 
 import os
@@ -28,14 +28,12 @@ DEFAULT_DB_CONFIG = {
 
 
 def ensure_controller_service(parent_pg, service_type, service_name, properties=None):
-    """在指定 PG (同層) 建立、配置並啟動 Controller Service"""
-    # 1. 取得該 PG 內的所有服務
+    """在 local_pg 內部建立並啟用 Controller Service (同層作用域)"""
     services = nipyapi.canvas.list_all_controllers(parent_pg.id)
     svc = next((s for s in services if s.component.name == service_name), None)
 
-    # 2. 不存在則建立在該 PG 內部 (同層作用域)
     if not svc:
-        print(f"[*] 在 PG [{parent_pg.component.name}] 建立 Controller: {service_name}...")
+        print(f"[*] 建立 Controller Service: {service_name}...")
         svc = nipyapi.canvas.create_controller(
             parent_pg=parent_pg,
             controller_type=service_type,
@@ -46,7 +44,6 @@ def ensure_controller_service(parent_pg, service_type, service_name, properties=
     if isinstance(svc, list):
         svc = svc[0]
 
-    # 3. 配置屬性 (若為 ENABLED 需先暫停以套用修改)
     if properties:
         if svc.component.state == "ENABLED":
             nipyapi.canvas.schedule_controller(svc, scheduled=False)
@@ -58,7 +55,7 @@ def ensure_controller_service(parent_pg, service_type, service_name, properties=
         svc.component.properties = properties
         svc = nipyapi.canvas.update_controller(svc, svc.component)
 
-    # 4. 啟用 Controller Service (必須處於 ENABLED，Processor 才能綁定成功)
+    # 確保 Controller Service 轉為 ENABLED
     svc = nipyapi.canvas.get_controller(svc.id, identifier_type="id")
     if isinstance(svc, list):
         svc = svc[0]
@@ -68,9 +65,8 @@ def ensure_controller_service(parent_pg, service_type, service_name, properties=
         try:
             nipyapi.canvas.schedule_controller(svc, scheduled=True)
         except Exception as e:
-            print(f"[!] schedule_controller 警告: {e}")
+            print(f"[!] schedule_controller 提示: {e}")
 
-        # 等待啟用完成
         for _ in range(20):
             svc = nipyapi.canvas.get_controller(svc.id, identifier_type="id")
             if isinstance(svc, list):
@@ -83,10 +79,13 @@ def ensure_controller_service(parent_pg, service_type, service_name, properties=
     return svc
 
 
-def repair_and_run_put_database_record(local_pg, dbcp_svc, json_reader_svc, table_name="target_table"):
-    """綁定 4 大屬性並立即切換為 RUNNING"""
+def repair_and_run_put_database_record(local_pg, dbcp_svc, json_reader_svc, table_name="raw_bike_availability"):
+    """更新屬性，並安全地處理啟動狀態"""
     # 1. 取得目標 Processor
     proc = nipyapi.canvas.get_processor(PUT_DB_PROC_ID, identifier_type="id")
+    if isinstance(proc, list):
+        proc = proc[0]
+
     if not proc:
         proc = nipyapi.canvas.get_processor(PUT_DB_PROC_NAME, identifier_type="name")
         if isinstance(proc, list) and proc:
@@ -99,7 +98,7 @@ def repair_and_run_put_database_record(local_pg, dbcp_svc, json_reader_svc, tabl
     if isinstance(proc, list):
         proc = proc[0]
 
-    # 2. 寫入標準 Display Name 屬性
+    # 2. 寫入 4 大必要屬性與路由關係
     config = proc.component.config
     config.properties["Record Reader"] = json_reader_svc.id
     config.properties["Database Connection Pooling Service"] = dbcp_svc.id
@@ -111,29 +110,42 @@ def repair_and_run_put_database_record(local_pg, dbcp_svc, json_reader_svc, tabl
         r for r in ["success", "failure", "retry"] if r in valid_rels
     ]
 
-    # 3. 提交更新
-    print(f"[*] 正在套用屬性至 {PUT_DB_PROC_NAME}...")
+    print(f"[*] 正在更新 PutDatabaseRecord 屬性配置...")
     updated_proc = nipyapi.canvas.update_processor(proc, config)
     time.sleep(1)
 
-    # 4. 重新抓取驗證狀態
+    # 3. 取得最新狀態以進行防禦性啟動
     updated_proc = nipyapi.canvas.get_processor(updated_proc.id, identifier_type="id")
     if isinstance(updated_proc, list):
         updated_proc = updated_proc[0]
 
-    print(f"[*] 驗證錯誤列表: {updated_proc.component.validation_errors}")
+    current_state = updated_proc.component.state
+    print(f"[*] 處理器當前狀態: {current_state}, 驗證錯誤: {updated_proc.component.validation_errors}")
 
-    # 5. 啟動處理器
-    print(f"[*] 正在將處理器切換至 RUNNING...")
-    nipyapi.canvas.schedule_processor(updated_proc, scheduled=True)
-    print(f"[+] PutDatabaseRecord 已啟動！開始消化 Matched to SQL 佇列。")
+    # 4. 防禦性啟動：避免重複發送 start 指令導致 STARTING 異常
+    if current_state == "STOPPED":
+        print(f"[*] 正在啟動 PutDatabaseRecord 處理器...")
+        try:
+            nipyapi.canvas.schedule_processor(updated_proc, scheduled=True)
+            print(f"[+] PutDatabaseRecord 啟動指令已送出！")
+        except Exception as e:
+            # 若已經處於 STARTING/RUNNING 則安全忽略
+            if "cannot be started because it is not stopped" in str(e):
+                print(f"[!] 處理器已在啟動中 (STARTING/RUNNING)，略過重複啟動。")
+            else:
+                raise e
+    else:
+        print(f"[+] 處理器當前為 {current_state}，無需重複啟動。")
+
     return updated_proc
 
 
 def create_local_2_sql_pg(parent_pg=None, *args, **kwargs):
     """主進入點函式"""
-    # 1. 取得 Local_2_SQL PG 實體
     local_pg = nipyapi.canvas.get_process_group(PROCESS_GROUP_ID, identifier_type="id")
+    if isinstance(local_pg, list):
+        local_pg = local_pg[0]
+
     if not local_pg:
         local_pg = nipyapi.canvas.get_process_group(PROCESS_GROUP_NAME, identifier_type="name")
         if isinstance(local_pg, list) and local_pg:
@@ -142,7 +154,7 @@ def create_local_2_sql_pg(parent_pg=None, *args, **kwargs):
     if not local_pg:
         raise ValueError(f"找不到 Process Group: {PROCESS_GROUP_NAME} ({PROCESS_GROUP_ID})")
 
-    # 2. 直接在 local_pg 內部建立/獲取 Controller Services（同層作用域，解決跨層解析盲區）
+    # 1. 確保同層 Controller Services 建立並 ENABLED
     db_config = kwargs.get("db_config", DEFAULT_DB_CONFIG)
     dbcp_properties = {
         "Database Connection URL": db_config["url"],
@@ -152,7 +164,6 @@ def create_local_2_sql_pg(parent_pg=None, *args, **kwargs):
         "Password": db_config["password"],
     }
 
-    print("[*] 正在為 Local_2_SQL 建立同層 Controller Services...")
     dbcp_svc = ensure_controller_service(
         parent_pg=local_pg,
         service_type="org.apache.nifi.dbcp.DBCPConnectionPool",
@@ -167,7 +178,7 @@ def create_local_2_sql_pg(parent_pg=None, *args, **kwargs):
         properties={},
     )
 
-    # 3. 修復 Processor 並啟動
+    # 2. 修復 Processor 配置
     table_name = kwargs.get("table_name", "raw_bike_availability")
     repair_and_run_put_database_record(
         local_pg, dbcp_svc, json_reader_svc, table_name=table_name
@@ -179,5 +190,9 @@ def create_local_2_sql_pg(parent_pg=None, *args, **kwargs):
 if __name__ == "__main__":
     nipyapi.config.nifi_config.host = "http://127.0.0.1:8080/nifi-api"
     pg = create_local_2_sql_pg()
-    nipyapi.canvas.schedule_process_group(pg.id, scheduled=True)
+    # 防禦性排程整組 PG
+    try:
+        nipyapi.canvas.schedule_process_group(pg.id, scheduled=True)
+    except Exception as e:
+        print(f"[!] PG 排程提示: {e}")
     print(f"[+] Local_2_SQL 排程啟動完成。")
