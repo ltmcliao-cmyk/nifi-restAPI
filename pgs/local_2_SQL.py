@@ -30,7 +30,7 @@ def build_local_2_sql_pg(parent_pg, db_config):
         pg_id=local_pg.id,
         port_type='INPUT_PORT',
         name='In_Local_JSON',
-        location=(100.0, 200.0)
+        position=(100.0, 200.0)
     )
 
     # 4. 建立 RouteOnAttribute 分流器
