@@ -118,7 +118,18 @@ def create_local_2_sql_pg(parent_pg, dbcp_service, input_dir="/opt/nifi/nifi-cur
         )
     )
 
-    # 7. 建立 PutDatabaseRecord 處理器 (使用正確的內部屬性鍵值)
+    # 7. 建立 PutDatabaseRecord 處理器
+    # 預防 Scope 問題：強制全域搜尋正確的 PostgreSQL DBCP ID
+    actual_dbcp_id = dbcp_service.id
+    try:
+        root_id = nipyapi.canvas.get_root_pg_id()
+        for svc in nipyapi.canvas.list_all_controllers(root_id):
+            if "DBCP" in svc.component.name:
+                actual_dbcp_id = svc.id
+                break
+    except Exception:
+        pass
+
     put_db = nipyapi.canvas.create_processor(
         parent_pg=local_pg,
         processor=nipyapi.canvas.get_processor_type('PutDatabaseRecord'),
@@ -129,7 +140,10 @@ def create_local_2_sql_pg(parent_pg, dbcp_service, input_dir="/opt/nifi/nifi-cur
         put_db,
         nipyapi.nifi.ProcessorConfigDTO(
             properties={
-                'put-db-record-dps': dbcp_service.id,
+                # 雙管齊下：同時設定內部 Descriptor Key 與 Display Name
+                'put-db-record-dps': actual_dbcp_id,
+                'Database Connection Pooling Service': actual_dbcp_id,
+                
                 'put-db-record-record-reader': json_reader.id,
                 'put-db-record-statement-type': 'INSERT',
                 'put-db-record-table-name': 'raw_bike_availability',
