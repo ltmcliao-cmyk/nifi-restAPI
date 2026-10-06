@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-pgs/local_2_SQL.py - Local_2_SQL 流程圖模組 (含 deploy-to-company 詳細日誌診斷版)
+pgs/local_2_SQL.py - Local_2_SQL 流程圖模組 (動態 Descriptor 鍵值對齊修復版)
 """
 
 import os
@@ -34,6 +34,28 @@ DEFAULT_DB_CONFIG = {
 def log(msg):
     """統一的 CI/CD 格式化日誌輸出"""
     print(f"[DEPLOY-LOG {time.strftime('%H:%M:%S')}] {msg}", flush=True)
+
+
+def resolve_descriptor_key(descriptors, target_display_name, fallback_kebab):
+    """
+    從 NiFi 的 PropertyDescriptors 中動態提取該屬性在後端註冊的真實 Key
+    """
+    if not descriptors:
+        return fallback_kebab
+
+    # 1. 依據 displayName 比對
+    for key, desc in descriptors.items():
+        if desc.display_name and desc.display_name.strip().lower() == target_display_name.strip().lower():
+            return key
+        if desc.name and desc.name.strip().lower() == target_display_name.strip().lower():
+            return key
+
+    # 2. 依據 fallback kebab 比對
+    for key, desc in descriptors.items():
+        if key.strip().lower() == fallback_kebab.strip().lower():
+            return key
+
+    return fallback_kebab
 
 
 def ensure_local_controller_service(local_pg, service_type, service_name, properties=None):
@@ -86,18 +108,14 @@ def ensure_local_controller_service(local_pg, service_type, service_name, proper
         except Exception as e:
             log(f"   [WARN] 啟用調度提示: {e}")
 
-        # 輪詢驗證
         for attempt in range(1, 21):
             time.sleep(0.5)
             svc = nipyapi.canvas.get_controller(svc.id, identifier_type="id")
             if isinstance(svc, list):
                 svc = svc[0]
-            log(f"   [輪詢 {attempt}/20] {service_name} 狀態: {svc.component.state}")
             if svc.component.state == "ENABLED":
                 log(f"[SUCCESS] {service_name} 已成功轉為 ENABLED！")
                 break
-            if svc.component.validation_errors:
-                log(f"   [ERR] {service_name} 校驗錯誤: {svc.component.validation_errors}")
 
     return svc
 
@@ -122,28 +140,55 @@ def repair_and_run_put_database_record(local_pg, dbcp_svc, json_reader_svc, tabl
         proc = proc[0]
 
     log(f"-> 目標處理器 UUID: {proc.id}")
-    log(f"-> 目前處理器狀態: {proc.component.state}, 原始校驗錯誤: {proc.component.validation_errors}")
+    descriptors = proc.component.config.descriptors or {}
 
-    # 注入屬性
-    config = proc.component.config
-    log(f"-> 綁定 Record Reader UUID: {json_reader_svc.id}")
-    log(f"-> 綁定 DBCP Pool UUID: {dbcp_svc.id}")
-    log(f"-> 設定 Table Name: {table_name}")
+    # 1. 動態解析出 NiFi 1.12.1 接受的 Property Keys
+    key_reader = resolve_descriptor_key(descriptors, "Record Reader", "record-reader")
+    key_dbcp = resolve_descriptor_key(descriptors, "Database Connection Pooling Service", "dbcp-service")
+    key_stmt = resolve_descriptor_key(descriptors, "Statement Type", "statement-type")
+    key_table = resolve_descriptor_key(descriptors, "Table Name", "table-name")
 
-    config.properties["Record Reader"] = json_reader_svc.id
-    config.properties["Database Connection Pooling Service"] = dbcp_svc.id
-    config.properties["Statement Type"] = "INSERT"
-    config.properties["Table Name"] = table_name
+    log(f"-> 解析得到實際 Key: Reader='{key_reader}', DBCP='{key_dbcp}', Statement='{key_stmt}', Table='{key_table}'")
+
+    # 2. 同時寫入解析出的 Key 與 Display Name 達成雙保險
+    props = proc.component.config.properties or {}
+    
+    # 填入解析 Key
+    props[key_reader] = json_reader_svc.id
+    props[key_dbcp] = dbcp_svc.id
+    props[key_stmt] = "INSERT"
+    props[key_table] = table_name
+
+    # 填入標準 Display Name
+    props["Record Reader"] = json_reader_svc.id
+    props["Database Connection Pooling Service"] = dbcp_svc.id
+    props["Statement Type"] = "INSERT"
+    props["Table Name"] = table_name
+
+    # 填入 Kebab-case
+    props["record-reader"] = json_reader_svc.id
+    props["dbcp-service"] = dbcp_svc.id
+    props["statement-type"] = "INSERT"
+    props["table-name"] = table_name
+
+    proc.component.config.properties = props
 
     valid_rels = [rel.name for rel in proc.component.relationships]
-    config.auto_terminated_relationships = [
+    proc.component.config.auto_terminated_relationships = [
         r for r in ["success", "failure", "retry"] if r in valid_rels
     ]
 
     log("-> 提交更新至 NiFi REST API...")
-    updated_proc = nipyapi.canvas.update_processor(proc, config)
+    try:
+        updated_proc = nipyapi.canvas.update_processor(proc, proc.component.config)
+    except Exception as e:
+        log(f"[WARN] canvas.update_processor 提示: {e}，改用底層 ProcessorsApi 更新...")
+        proc_fresh = nipyapi.canvas.get_processor(proc.id, identifier_type="id")
+        proc_fresh.component.config.properties = props
+        proc_fresh.component.config.auto_terminated_relationships = proc.component.config.auto_terminated_relationships
+        updated_proc = nipyapi.nifi.ProcessorsApi().update_processor(id=proc.id, body=proc_fresh)
 
-    # 輪詢等待 NiFi 校驗
+    # 3. 輪詢校驗狀態
     log("-> 等待 NiFi 完成底層校驗 (消除 4 大必填錯誤)...")
     for attempt in range(1, 16):
         time.sleep(0.5)
@@ -165,7 +210,7 @@ def repair_and_run_put_database_record(local_pg, dbcp_svc, json_reader_svc, tabl
     else:
         log("[SUCCESS] 4 項必填欄位驗證全部通過！")
 
-    # 狀態啟動
+    # 4. 啟動處理器
     current_state = updated_proc.component.state
     log(f"-> 處理器更新後狀態: {current_state}")
 
@@ -193,7 +238,6 @@ def create_local_2_sql_pg(parent_pg=None, *args, **kwargs):
     log("=== [START] Local_2_SQL 流程圖配置部署 ===")
     log("==========================================")
     try:
-        # 1. 取得 PG
         local_pg = nipyapi.canvas.get_process_group(PROCESS_GROUP_ID, identifier_type="id")
         if isinstance(local_pg, list):
             local_pg = local_pg[0]
@@ -208,11 +252,7 @@ def create_local_2_sql_pg(parent_pg=None, *args, **kwargs):
 
         log(f"[OK] 找到目標 PG: {local_pg.component.name} ({local_pg.id})")
 
-        # 2. 準備連線設定
         db_config = kwargs.get("db_config", DEFAULT_DB_CONFIG)
-        log(f"-> 資料庫 URL: {db_config.get('url')}")
-        log(f"-> 驅動位置: {db_config.get('driver_location')}")
-
         dbcp_properties = {
             "Database Connection URL": db_config["url"],
             "Database Driver Class Name": db_config["driver_class"],
@@ -221,7 +261,7 @@ def create_local_2_sql_pg(parent_pg=None, *args, **kwargs):
             "Password": db_config["password"],
         }
 
-        # 3. 確保同層 Services
+        # 確保同層 Services 存在且 ENABLED
         dbcp_svc = ensure_local_controller_service(
             local_pg=local_pg,
             service_type="org.apache.nifi.dbcp.DBCPConnectionPool",
@@ -236,7 +276,7 @@ def create_local_2_sql_pg(parent_pg=None, *args, **kwargs):
             properties={},
         )
 
-        # 4. 修復處理器
+        # 修復處理器並啟動
         table_name = kwargs.get("table_name", "raw_bike_availability")
         repair_and_run_put_database_record(
             local_pg, dbcp_svc, json_reader_svc, table_name=table_name
@@ -248,9 +288,7 @@ def create_local_2_sql_pg(parent_pg=None, *args, **kwargs):
         return local_pg
 
     except Exception as e:
-        log("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
         log(f"[FATAL ERROR] 部署過程發生致命例外: {e}")
-        log("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
         traceback.print_exc()
         raise e
 
