@@ -20,17 +20,48 @@ def init_dbcp_pool(parent_pg, db_config):
     Returns:
         ControllerServiceEntity: 已啟用的 DBCP Controller Service 實例。
     """
-    # 1. 取得 DBCPConnectionPool 的抽象型別定義 (第一層封裝: get_controller_type)
-    dbcp_type = nipyapi.canvas.get_controller_type('DBCPConnectionPool')
+    pool_name = "PostgreSQL_DBCP_Pool"
+
+    # 1. 檢查是否已經存在同名的 Controller Service，若有則直接重複使用或更新
+    existing_services = nipyapi.canvas.list_all_controllers(parent_pg.id)
+    if existing_services:
+        for svc in existing_services:
+            if svc.component.name == pool_name:
+                # 確保處於啟用狀態後回傳
+                nipyapi.canvas.schedule_controller(svc, scheduled=True)
+                return svc
+
+    # 2. 取得 DBCPConnectionPool 的抽象型別定義
+    # 使用完整類別名稱匹配，避免回傳 list 或模糊比對失敗
+    types = nipyapi.canvas.get_controller_type('org.apache.nifi.dbcp.DBCPConnectionPool', identifier_type='name')
     
-    # 2. 於指定 PG 建立 Controller Service
+    # 防禦性處理：若回傳為 list 則取出第一項
+    if isinstance(types, list):
+        if not types:
+            # 若完整類別找不到，嘗試簡稱
+            types = nipyapi.canvas.get_controller_type('DBCPConnectionPool')
+            if isinstance(types, list):
+                if not types:
+                    raise ValueError("在 NiFi 中找不到 DBCPConnectionPool 類型的 Controller Service")
+                dbcp_type = types[0]
+            else:
+                dbcp_type = types
+        else:
+            dbcp_type = types[0]
+    else:
+        dbcp_type = types
+
+    if not dbcp_type:
+        raise ValueError("無法解析 DBCPConnectionPool 的 DocumentedTypeDTO")
+
+    # 3. 於指定 PG 建立 Controller Service
     dbcp_service = nipyapi.canvas.create_controller(
         parent_pg=parent_pg,
         controller=dbcp_type,
-        name="PostgreSQL_DBCP_Pool"
+        name=pool_name
     )
     
-    # 3. 填入連線屬性 (參考 compose.md 與 PostgreSQL 14 容器設定)
+    # 4. 填入連線屬性 (參考 compose.md 與 PostgreSQL 14 容器設定)
     config_dto = nipyapi.nifi.ControllerServiceDTO(
         properties={
             'Database Connection URL': db_config.get('url', 'jdbc:postgresql://postgres:5432/pipeline_db'),
@@ -42,7 +73,7 @@ def init_dbcp_pool(parent_pg, db_config):
     )
     nipyapi.canvas.update_controller(dbcp_service, config_dto)
     
-    # 4. 啟用 Controller Service 供後續 Processor 使用
+    # 5. 啟用 Controller Service 供後續 Processor 使用
     nipyapi.canvas.schedule_controller(dbcp_service, scheduled=True)
     return dbcp_service
 
