@@ -28,7 +28,7 @@ jobs:
           PYTHONIOENCODING: "utf-8"
         run: |
           echo "正在部署至 [本機] NiFi..."
-          python3 deploy.py
+          python3 main.py
 
   # 任務 2：公司機主要部署（Push 到 main 分支觸發 -> 派給 Windows 本機 Runner）
   deploy-to-company:
@@ -50,6 +50,8 @@ jobs:
           PYTHONUTF8: "1"
           PYTHONIOENCODING: "utf-8"
         run: |
-          $OutputEncoding = [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+          $OutputEncoding = [System.Text.Encoding]::UTF8
+          chcp 65001 > $null
           Write-Output "正在部署至 [公司機] NiFi..."
-          python deploy.py
+          python main.py
