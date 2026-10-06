@@ -1,3 +1,6 @@
+# -*- coding: utf-8 -*-
+import nipyapi
+
 def init_dbcp_pool(parent_pg, db_config):
     """
     建立並確保 PostgreSQL DBCPConnectionPool Controller Service 可用。
