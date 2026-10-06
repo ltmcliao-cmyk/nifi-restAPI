@@ -7,19 +7,22 @@ main.py - 純粹的系統調度器 (簡化版)
 3. 流程導向：完全依循 [Endpoint -> Infra -> PG Build -> Inter-PG Routes -> Schedule] 執行。
 """
 
+import os
 import nipyapi
 import infra
 from pgs import local_2_SQL
 import routes
 
+
 def main():
-    # 1. 設定 NiFi API 連線端點 (第一層封裝設定)
-    nipyapi.config.nifi_config.host = 'http://localhost:8080/nifi-api'
+    # 1. 設定 NiFi API 連線端點 (優先讀取環境變數 NIFI_HOST)
+    nifi_host = os.getenv('NIFI_HOST', 'http://localhost:8080')
+    nipyapi.config.nifi_config.host = f"{nifi_host.rstrip('/')}/nifi-api"
 
     # 2. 獲取 Canvas Root Process Group
     root_pg = nipyapi.canvas.get_process_group('root')
 
-    # 3. 載入 Infra (建置 PostgreSQL DBCP 連線池)
+    # 3. 載入 Infra (建置 PostgreSQL DBCP 連線池於 Root PG)
     db_config = {
         'url': 'jdbc:postgresql://postgres:5432/pipeline_db',
         'driver_class': 'org.postgresql.Driver',
@@ -30,8 +33,12 @@ def main():
     dbcp_service = infra.init_dbcp_pool(root_pg, db_config)
 
     # 4. 載入 PG (建立 local_2_SQL 業務邏輯及其內部 FlowFile 拓樸)
-    #    此處直接傳回 local_pg 實例，無需導出內部 processors 字典
+    #    若 local_2_SQL 支援由 routes 管理的 Input Port，此處接收回傳實例
     local_pg = local_2_SQL.build_local_2_sql_pg(root_pg, dbcp_service)
+    
+    # 若 local_2_SQL 同時回傳了 (local_pg, input_port) 則解包：
+    if isinstance(local_pg, tuple):
+        local_pg, input_port = local_pg
 
     # 5. 執行跨 PG (Port-to-Port) 拓樸路由 (目前為單一 PG 預留介面)
     routes.build_inter_pg_routes()
@@ -39,6 +46,7 @@ def main():
     # 6. 啟動 Process Group 開始運作
     nipyapi.canvas.schedule_process_group(local_pg.id, scheduled=True)
     print(f"[OK] Successfully initialized and started Process Group '{local_pg.component.name}' (ID: {local_pg.id})")
+
 
 if __name__ == '__main__':
     main()
