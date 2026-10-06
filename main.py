@@ -32,8 +32,8 @@ def main():
     }
     dbcp_service = infra.init_dbcp_pool(root_pg, db_config)
 
-    # 4. 指定 Windows 本地資料路徑 (使用 raw string 避免斜線轉義錯誤)
-    raw_data_dir = r"C:\Users\lutomica\Desktop\Dana mission\data\raw"
+    # 4. 指定 NiFi 容器內部對應的掛載路徑 (配合 compose 的 ./data/raw 映射)
+    raw_data_dir = "/opt/nifi/nifi-current/data/raw"
 
     # 5. 載入 PG (建立 local_2_SQL 業務邏輯及其內部 FlowFile 拓樸)
     local_pg = local_2_SQL.create_local_2_sql_pg(

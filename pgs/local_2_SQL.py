@@ -40,13 +40,13 @@ def purge_process_group_safely(pg_entity):
         print(f"Warning: Failed to purge old process group {pg_id}: {e}")
 
 
-def create_local_2_sql_pg(parent_pg, dbcp_service, input_dir=r"C:\Users\lutomica\Desktop\Dana mission\data\raw", file_filter=".*\\.json"):
+def create_local_2_sql_pg(parent_pg, dbcp_service, input_dir="/opt/nifi/nifi-current/data/raw", file_filter=".*\\.json"):
     """
-    建立 Local_2_SQL Process Group，使用 GetFile 遞迴讀取本地資料夾並寫入 PostgreSQL。
+    建立 Local_2_SQL Process Group，使用 GetFile 遞迴讀取容器內路徑並寫入 PostgreSQL。
     
     :param parent_pg: 上層 Process Group (例如 Root Process Group)
     :param dbcp_service: 外部已初始化的 DBCPConnectionPool 服務實例
-    :param input_dir: GetFile 監聽的本地資料夾路徑
+    :param input_dir: GetFile 監聽的容器內路徑
     :param file_filter: GetFile 抓取的檔案檔名 Regular Expression
     """
     pg_name = "Local_2_SQL"
@@ -67,7 +67,7 @@ def create_local_2_sql_pg(parent_pg, dbcp_service, input_dir=r"C:\Users\lutomica
     # 3. 初始化 Process Group 內部的 JsonTreeReader Controller Service
     json_reader = init_json_reader(local_pg)
 
-    # 4. 建立 GetFile 處理器 (開啟 Recurse Subdirectories 支援子目錄遞迴)
+    # 4. 建立 GetFile 處理器
     get_file = nipyapi.canvas.create_processor(
         parent_pg=local_pg,
         processor=nipyapi.canvas.get_processor_type('GetFile'),
@@ -80,8 +80,8 @@ def create_local_2_sql_pg(parent_pg, dbcp_service, input_dir=r"C:\Users\lutomica
             properties={
                 'Input Directory': input_dir,
                 'File Filter': file_filter,
-                'Keep Source File': 'true',          # 設為 true 避免本地原始 JSON 檔被 NiFi 刪除
-                'Recurse Subdirectories': 'true',    # 關鍵：自動讀取 raw 目錄下所有子資料夾內的檔案
+                'Keep Source File': 'true',          # 配合 :ro 唯讀掛載，不可刪除原始檔案
+                'Recurse Subdirectories': 'true',    # 遞迴抓取下一層子目錄內的所有檔案
                 'Minimum File Age': '0 sec',
                 'Polling Interval': '10 sec',
                 'Ignore Hidden Files': 'true'
