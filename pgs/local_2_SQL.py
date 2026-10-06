@@ -100,12 +100,15 @@ def create_local_2_sql_pg(parent_pg, dbcp_service, input_dir="/tmp/input", file_
         route_proc,
         nipyapi.nifi.ProcessorConfigDTO(
             properties={
-                'Routing Strategy': 'Route to Property name',
-                'matched': "${filename:endsWith('.json')}"
+                'Routing Strategy': 'Route to Property name'
             },
             auto_terminated_relationships=['unmatched']
         )
     )
+    # 動態屬性需獨立設定，以觸發 NiFi 註冊 'matched' Relationship
+    nipyapi.canvas.set_processor_property(route_proc, 'matched', "${filename:endsWith('.json')}")
+    # 重新取得 Processor 實例，同步最新的 relationships 清單
+    route_proc = nipyapi.canvas.get_processor(route_proc.id)
 
     # 6. 建立 PutDatabaseRecord 處理器 (寫入 PostgreSQL)
     put_db = nipyapi.canvas.create_processor(
