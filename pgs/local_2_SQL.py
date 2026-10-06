@@ -3,10 +3,11 @@
 """pgs/local_2_SQL.py - Local_2_SQL 流程圖模組
 
 設計精神：
-1. 模組化複用：完全引用 infra.py 建立之 Root PG 基礎連線與 Reader。
+1. 模組化複用：引用 infra.py 並將 DBCP 連線池與 Reader 建立於 Local_2_SQL 同層作用域（Co-location），避免跨層綁定失敗。
 2. 高階封裝：全面使用 nipyapi.canvas 第一層 API，不暴露底層 DTO。
-3. 版本自癒：更新 processor 前重新取得最新 entity，避免 revision 衝突。
-4. 介面相容：回傳原生 ProcessGroupEntity，保證 main.py 的 local_pg.id 正常排程。
+3. 服務預先啟用：在綁定處理器前確保 Controller Services 處於 ENABLED 狀態。
+4. 版本自癒：更新 processor 前重新取得最新 entity，避免 revision 衝突。
+5. 介面相容：回傳原生 ProcessGroupEntity，保證 main.py 的 local_pg.id 正常排程。
 """
 
 import os
@@ -34,35 +35,55 @@ DEFAULT_DB_CONFIG = {
 }
 
 
-def get_or_create_infra_services(root_pg, db_config=None):
-    """透過 infra.py 取得或初始化 DBCP 連線池與 JsonTreeReader"""
+def get_or_create_infra_services(local_pg, db_config=None):
+    """透過 infra.py 取得或初始化 DBCP 連線池與 JsonTreeReader（均建於 local_pg 同層作用域）"""
     config = db_config or DEFAULT_DB_CONFIG
 
-    # 1. 檢查並獲取 PostgreSQL DBCP 連線池
-    dbcp_service = nipyapi.canvas.get_controller(
-        "PostgreSQL_DBCP_Pool", identifier_type="name"
+    # 1. 檢查並獲取屬於 local_pg 作用域的 PostgreSQL DBCP 連線池
+    local_controllers = nipyapi.canvas.list_all_controllers(local_pg.id)
+    dbcp_service = next(
+        (
+            c
+            for c in local_controllers
+            if c.component.name == "PostgreSQL_DBCP_Pool"
+            and c.component.parent_group_id == local_pg.id
+        ),
+        None,
     )
-    if isinstance(dbcp_service, list) and dbcp_service:
-        dbcp_service = dbcp_service[0]
-    if not dbcp_service:
-        print("[*] 呼叫 infra.init_dbcp_pool 初始化連線池...")
-        dbcp_service = infra.init_dbcp_pool(root_pg, config)
 
-    # 2. 檢查並獲取 JsonTreeReader
-    json_reader = nipyapi.canvas.get_controller(
-        "JsonTreeReader_Local", identifier_type="name"
+    if not dbcp_service:
+        print(
+            "[*] 呼叫 infra.init_dbcp_pool 初始化連線池 (建立於 Local_2_SQL 同層)..."
+        )
+        dbcp_service = infra.init_dbcp_pool(local_pg, config)
+
+    # 2. 檢查並獲取屬於 local_pg 作用域的 JsonTreeReader
+    json_reader = next(
+        (
+            c
+            for c in local_controllers
+            if c.component.name == "JsonTreeReader_Local"
+            and c.component.parent_group_id == local_pg.id
+        ),
+        None,
     )
-    if isinstance(json_reader, list) and json_reader:
-        json_reader = json_reader[0]
+
     if not json_reader:
-        print("[*] 呼叫 infra.init_json_reader 初始化 Reader...")
-        json_reader = infra.init_json_reader(root_pg)
+        print(
+            "[*] 呼叫 infra.init_json_reader 初始化 Reader (建立於 Local_2_SQL 同層)..."
+        )
+        json_reader = infra.init_json_reader(local_pg)
+
+    # 3. 自動啟用 Controller Service，確保在 Processor 綁定前為 ENABLED 狀態
+    print("[*] 確保 Controller Services 處於 ENABLED 狀態...")
+    nipyapi.canvas.schedule_controller(dbcp_service, scheduled=True)
+    nipyapi.canvas.schedule_controller(json_reader, scheduled=True)
 
     return dbcp_service, json_reader
 
 
 def configure_put_database_record(
-    local_pg, dbcp_service, json_reader, table_name="target_table"
+    local_pg, dbcp_service, json_reader, table_name="raw_bike_availability"
 ):
     """使用 nipyapi.canvas 修復 PutDatabaseRecord 處理器的 4 大必要屬性與路由"""
     # 1. 取得目標處理器實體
@@ -88,7 +109,7 @@ def configure_put_database_record(
     if isinstance(target_proc, list):
         target_proc = target_proc[0]
 
-    # 3. 填入 4 項必要屬性並設定 auto-terminate
+    # 3. 填入 4 項必要屬性（嚴格對齊 NiFi 官方 Display Name）並設定 auto-terminate
     config = target_proc.component.config
     config.properties["Record Reader"] = json_reader.id
     config.properties["Database Connection Pooling Service"] = dbcp_service.id
@@ -105,9 +126,9 @@ def configure_put_database_record(
 
 
 def create_local_2_sql_pg(parent_pg=None, *args, **kwargs):
-    """提供給 main.py 第 33 行呼叫的標準入口函式。
+    """提供給 main.py 呼叫的標準入口函式。
 
-    回傳原生 ProcessGroupEntity 物件，供 main.py 第 44 行排程啟動。
+    回傳原生 ProcessGroupEntity 物件，供 main.py 排程啟動。
     """
     # 1. 取得 Root Process Group 實體
     if not parent_pg:
@@ -143,18 +164,22 @@ def create_local_2_sql_pg(parent_pg=None, *args, **kwargs):
             location=(0, 0),
         )
 
-    # 3. 透過 infra.py 確保 Controller Services 存在且已啟用 (ENABLED)
+    # 3. 透過 infra.py 確保 Controller Services 在 local_pg 同層建立且已啟用 (ENABLED)
     db_config = kwargs.get("db_config", DEFAULT_DB_CONFIG)
     dbcp_service = kwargs.get("dbcp_service")
     json_reader = kwargs.get("json_reader") or kwargs.get("reader_service")
 
     if not dbcp_service or not json_reader:
         dbcp_service, json_reader = get_or_create_infra_services(
-            root_pg, db_config
+            local_pg, db_config
         )
+    else:
+        # 外部直接傳入時，仍確保服務處於 ENABLED 狀態
+        nipyapi.canvas.schedule_controller(dbcp_service, scheduled=True)
+        nipyapi.canvas.schedule_controller(json_reader, scheduled=True)
 
-    # 4. 修復處理器屬性
-    table_name = kwargs.get("table_name", "target_table")
+    # 4. 修復處理器屬性（預設表名對齊 'raw_bike_availability'）
+    table_name = kwargs.get("table_name", "raw_bike_availability")
     configure_put_database_record(
         local_pg, dbcp_service, json_reader, table_name=table_name
     )
