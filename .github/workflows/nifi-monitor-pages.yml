@@ -1,61 +1,62 @@
-name: NiFi Full Pipeline Diagnostics & Monitor
+name: Fetch NiFi Context (Manual Trigger)
 
-# 觸發條件：定期 Cron 自動執行 或 手動點擊 (workflow_dispatch)
+# 僅允許在 GitHub Actions 頁面手動點擊「Run workflow」觸發
 on:
-  schedule:
-    - cron: '*/15 * * * *'  # 每 15 分鐘定期執行一次快照擷取 [1]
-  workflow_dispatch:        # 支援 GitHub 頁面手動觸發執行
+  workflow_dispatch:
 
-# 權限配置：允許 Workflow 推送內容與更新 GitHub Pages / Artifacts [1]
+# 最小權限：僅需讀取程式碼
 permissions:
-  contents: write
-  pages: write
-  id-token: write
+  contents: read
 
 jobs:
-  collect-nifi-context:
-    name: Run Universal NiFi Diagnostic Collector
-    # 指定於本機 Self-Hosted Runner 執行，方能存取本機 localhost:8080 容器 API [1]
-    runs-on: self-hosted
+  fetch-and-display-json:
+    runs-on: ubuntu-latest
+    # 若你的 NiFi 運行在內網本機，請將上一行改為你的 self-hosted runner，例如：
+    # runs-on: [self-hosted, linux]
 
     steps:
-      # 1. 檢出程式碼庫
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # 2. 設置 Python 環境 (使用環境現有 Python)
-      - name: Set up Python Environment
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.11'
 
-      # 3. 安裝必要依賴套件
-      - name: Install Dependencies
+      - name: Install Python Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install requests nipyapi
+          pip install requests urllib3
 
-      # 4. 執行通用 Diagnostics 腳本 (呼叫 4 大端點並遞迴產出 JSON)
-      - name: Fetch NiFi Universal AI Context JSON
-        env:
-          NIFI_API_BASE: "http://localhost:8080/nifi-api"
+      - name: Run Fetch NiFi Context Script
         run: |
+          echo "執行 NiFi Context 擷取腳本..."
           python fetch_all_nifi_context.py
 
-      # 5. 上傳 JSON 報告為 Actions Artifact (供手動下載丟給 AI)
-      - name: Upload AI Context Artifact
+      - name: Display JSON on Action Summary Page
+        run: |
+          echo "### 📊 NiFi 狀態回傳結果 (JSON)" >> $GITHUB_STEP_SUMMARY
+          echo "以下為本次手動執行的完整回傳內容，點擊展開即可查看或一鍵複製：" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # 檢查檔案大小（GitHub Step Summary 限制最大為 1024KB）
+          FILE_SIZE=$(wc -c < nifi_context.json)
+          if [ $FILE_SIZE -gt 900000 ]; then
+            echo "> ⚠️ **注意**：JSON 檔案超過 900KB，超出 GitHub Summary 頁面渲染上限，請直接至最下方下載 Artifact。" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "<details><summary><b>點擊展開完整 JSON 內容</b></summary>" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo '```json' >> $GITHUB_STEP_SUMMARY
+            cat nifi_context.json >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "</details>" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Upload Context JSON Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: nifi-ai-context-report
-          path: nifi_full_ai_context.json
+          name: nifi-context-report
+          path: nifi_context.json
           retention-days: 7
-
-      # 6. 自動 Commit 快照檔並推送到 GitHub (選擇性啟用)
-      - name: Commit and Push Diagnostic Snapshot
-        run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add nifi_full_ai_context.json
-          git status
-          git commit -m "chore(monitor): update universal NiFi AI context snapshot [skip ci]" || echo "No changes to commit"
-          git push
+          if-no-files-found: error
