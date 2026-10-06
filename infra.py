@@ -1,17 +1,7 @@
-# -*- coding: utf-8 -*-
-"""
-infra.py - 不常改動的基礎設施配置模組
-設計邏輯與精神：
-1. 第一性原理：資料庫連線池 (DBCP) 為全域共享之基礎服務，獨立於特定業務邏輯之外。
-2. 操作第一層封裝：使用 nipyapi.canvas 提供的 create_controller, update_controller, schedule_controller。
-3. 避免全域變數：連線參數以傳入字典 (db_config) 管理，發揮正交性。
-"""
-
-import nipyapi
-
 def init_dbcp_pool(parent_pg, db_config):
     """
-    建立並啟用 PostgreSQL DBCPConnectionPool Controller Service。
+    建立並確保 PostgreSQL DBCPConnectionPool Controller Service 可用。
+    若已存在且啟用，直接沿用；若未啟用則啟用它。
     """
     pool_name = "PostgreSQL_DBCP_Pool"
 
@@ -24,7 +14,7 @@ def init_dbcp_pool(parent_pg, db_config):
                 target_service = svc
                 break
 
-    # 2. 不存在則建立
+    # 2. 不存在則建立並設定屬性
     if not target_service:
         types = nipyapi.canvas.get_controller_type('org.apache.nifi.dbcp.DBCPConnectionPool', identifier_type='name')
         if isinstance(types, list):
@@ -38,32 +28,21 @@ def init_dbcp_pool(parent_pg, db_config):
             name=pool_name
         )
 
-    # 3. 確保服務處於停用狀態 (若正在運行則無法修改 properties)
+        # 填入連線屬性
+        config_dto = nipyapi.nifi.ControllerServiceDTO(
+            properties={
+                'Database Connection URL': db_config.get('url', 'jdbc:postgresql://postgres:5432/pipeline_db'),
+                'Database Driver Class Name': db_config.get('driver_class', 'org.postgresql.Driver'),
+                'Database Driver Location(s)': db_config.get('driver_location', '/opt/nifi/nifi-current/drivers/postgresql-42.7.3.jar'),
+                'Database User': db_config.get('user', 'postgres'),
+                'Password': db_config.get('password', 'postgrespassword123')
+            }
+        )
+        target_service = nipyapi.canvas.update_controller(target_service, config_dto)
+
+    # 3. 確保服務處於啟用狀態
     target_service = nipyapi.canvas.get_controller(target_service.id, 'id')
-    if target_service.component.state != 'DISABLED':
-        nipyapi.canvas.schedule_controller(target_service, scheduled=False)
-        target_service = nipyapi.canvas.get_controller(target_service.id, 'id')
+    if target_service.component.state != 'ENABLED':
+        nipyapi.canvas.schedule_controller(target_service, scheduled=True)
 
-    # 4. 取得最新 Revision 後再更新設定
-    config_dto = nipyapi.nifi.ControllerServiceDTO(
-        properties={
-            'Database Connection URL': db_config.get('url', 'jdbc:postgresql://postgres:5432/pipeline_db'),
-            'Database Driver Class Name': db_config.get('driver_class', 'org.postgresql.Driver'),
-            'Database Driver Location(s)': db_config.get('driver_location', '/opt/nifi/nifi-current/drivers/postgresql-42.7.3.jar'),
-            'Database User': db_config.get('user', 'postgres'),
-            'Password': db_config.get('password', 'postgrespassword123')
-        }
-    )
-    target_service = nipyapi.canvas.update_controller(target_service, config_dto)
-
-    # 5. 重新啟用 Controller Service
-    nipyapi.canvas.schedule_controller(target_service, scheduled=True)
     return target_service
-
-
-def quiesce_process_group(pg_id):
-    """
-    通用 Quiesce 函式：安全停止指定 Process Group 及其底下所有組件。
-    奧卡姆剃刀原則：不封裝複雜類別，單一函式直達目的。
-    """
-    return nipyapi.canvas.schedule_process_group(process_group_id=pg_id, scheduled=False)
