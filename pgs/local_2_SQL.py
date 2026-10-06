@@ -1,170 +1,186 @@
-# -- coding: utf-8 --
-"""
-pgs/local_2_SQL.py
-建置 Local_2_SQL Process Group 與 PostgreSQL 寫入流程。
-1. ListFile + FetchFile 架構安全讀取 Raw JSON。
-2. 自動銜接已啟用的 DBCP 連線池與 JsonTreeReader。
-3. 自動排程全流程，無需手動點擊啟用或啟動。
-"""
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 
 import time
-import nipyapi
-from infra import init_json_reader
+import requests
+
+NIFI_API_BASE = "http://127.0.0.1:8080/nifi-api"
+PROCESS_GROUP_ID = "10d7800a-01a1-1000-e2d4-9b50ad6cf816"
+PUT_DB_PROCESSOR_ID = "10d78562-01a1-1000-adec-5b289ce54b88"
+
+# 請依實際環境填寫資料庫與表格設定
+DB_CONFIG = {
+    "url": "jdbc:postgresql://localhost:5432/your_database",
+    "driver_class": "org.postgresql.Driver",
+    "driver_location": "/opt/nifi/drivers/postgresql-42.2.14.jar",  # 填入容器或主機中 PostgreSQL JDBC JAR 的路徑
+    "user": "postgres",
+    "password": "your_password",
+    "table_name": "target_table",  # 寫入目標資料表名稱
+    "statement_type": "INSERT",  # INSERT, UPDATE, UPSERT 等
+}
 
 
-def purge_process_group_safely(pg_entity):
-    """安全停止並刪除指定的 Process Group。"""
-    pg_id = pg_entity.id
-
-    try:
-        nipyapi.canvas.schedule_process_group(pg_id, scheduled=False)
-        time.sleep(1)
-    except Exception:
-        pass
-
-    try:
-        controllers = nipyapi.canvas.list_all_controllers(pg_id)
-        if controllers:
-            for svc in controllers:
-                if svc.component.state != 'DISABLED':
-                    nipyapi.canvas.schedule_controller(svc, scheduled=False)
-            time.sleep(1)
-    except Exception:
-        pass
-
-    try:
-        nipyapi.canvas.delete_process_group(pg_entity, force=True)
-        time.sleep(1)
-    except Exception as e:
-        print(f"Warning: Failed to purge old process group {pg_id}: {e}")
+def get_pg_info(pg_id: str):
+    """取得 Process Group 資訊與版本號"""
+    resp = requests.get(f"{NIFI_API_BASE}/process-groups/{pg_id}")
+    resp.raise_for_status()
+    return resp.json()
 
 
-def create_local_2_sql_pg(parent_pg, dbcp_service, input_dir="/opt/nifi/nifi-current/data/raw", file_filter=".*\\.json"):
-    """
-    建立 Local_2_SQL Process Group。
-    """
-    pg_name = "Local_2_SQL"
+def create_or_get_dbcp_service(pg_id: str) -> str:
+    """在指定 Process Group 建立並啟用 PostgreSQL DBCPConnectionPool"""
+    url = f"{NIFI_API_BASE}/process-groups/{pg_id}/controller-services"
 
-    # 1. 清理既有同名群組
-    existing_pgs = nipyapi.canvas.list_all_process_groups(parent_pg.id)
-    for pg in existing_pgs:
-        if pg.component.name == pg_name:
-            purge_process_group_safely(pg)
-
-    # 2. 建立新群組
-    local_pg = nipyapi.canvas.create_process_group(
-        parent_pg=parent_pg,
-        new_pg_name=pg_name,
-        location=(400, 400)
-    )
-
-    # 3. 初始化內部 JsonTreeReader
-    json_reader = init_json_reader(local_pg)
-
-    # 4. 建立 ListFile 處理器
-    list_file = nipyapi.canvas.create_processor(
-        parent_pg=local_pg,
-        processor=nipyapi.canvas.get_processor_type('ListFile'),
-        location=(300, 50),
-        name="List Local Raw Files"
-    )
-    nipyapi.canvas.update_processor(
-        list_file,
-        nipyapi.nifi.ProcessorConfigDTO(
-            properties={
-                'Input Directory': input_dir,
-                'Recurse Subdirectories': 'true',
-                'File Filter': file_filter,
-                'Minimum File Age': '0 sec'
+    payload = {
+        "revision": {"version": 0},
+        "component": {
+            "name": "PostgreSQL Connection Pool",
+            "type": "org.apache.nifi.dbcp.DBCPConnectionPool",
+            "properties": {
+                "Database Connection URL": DB_CONFIG["url"],
+                "Database Driver Class Name": DB_CONFIG["driver_class"],
+                "Database Driver Location(s)": DB_CONFIG["driver_location"],
+                "Database User": DB_CONFIG["user"],
+                "Password": DB_CONFIG["password"],
             },
-            scheduling_strategy='TIMER_DRIVEN',
-            scheduling_period='10 sec'
-        )
+        },
+    }
+
+    resp = requests.post(url, json=payload)
+    if resp.status_code == 201:
+        cs_data = resp.json()
+        cs_id = cs_data["id"]
+        print(f"[+] DBCPConnectionPool 建立成功: {cs_id}")
+    else:
+        # 若已存在則取得列表
+        services = requests.get(
+            f"{NIFI_API_BASE}/flow/process-groups/{pg_id}/controller-services"
+        ).json()
+        for svc in services.get("controllerServices", []):
+            if "DBCPConnectionPool" in svc["component"]["type"]:
+                return svc["id"]
+        resp.raise_for_status()
+
+    # 啟用 Controller Service
+    enable_controller_service(cs_id)
+    return cs_id
+
+
+def create_or_get_record_reader(pg_id: str, reader_type="json") -> str:
+    """建立並啟用 Record Reader (預設 JsonTreeReader，亦可改為 CSVReader)"""
+    service_type = (
+        "org.apache.nifi.json.JsonTreeReader"
+        if reader_type == "json"
+        else "org.apache.nifi.csv.CSVReader"
+    )
+    service_name = (
+        "Default JsonTreeReader"
+        if reader_type == "json"
+        else "Default CSVReader"
     )
 
-    # 5. 建立 FetchFile 處理器 (唯讀讀取)
-    fetch_file = nipyapi.canvas.create_processor(
-        parent_pg=local_pg,
-        processor=nipyapi.canvas.get_processor_type('FetchFile'),
-        location=(300, 220),
-        name="Fetch Raw Content (Read Only)"
+    url = f"{NIFI_API_BASE}/process-groups/{pg_id}/controller-services"
+    payload = {
+        "revision": {"version": 0},
+        "component": {"name": service_name, "type": service_type},
+    }
+
+    resp = requests.post(url, json=payload)
+    if resp.status_code == 201:
+        cs_data = resp.json()
+        cs_id = cs_data["id"]
+        print(f"[+] Record Reader 建立成功: {cs_id}")
+    else:
+        services = requests.get(
+            f"{NIFI_API_BASE}/flow/process-groups/{pg_id}/controller-services"
+        ).json()
+        for svc in services.get("controllerServices", []):
+            if reader_type in svc["component"]["type"].lower():
+                return svc["id"]
+        resp.raise_for_status()
+
+    enable_controller_service(cs_id)
+    return cs_id
+
+
+def enable_controller_service(cs_id: str):
+    """啟用指定 Controller Service"""
+    detail = requests.get(f"{NIFI_API_BASE}/controller-services/{cs_id}").json()
+    version = detail["revision"]["version"]
+
+    payload = {"revision": {"version": version}, "state": "ENABLED"}
+    resp = requests.put(
+        f"{NIFI_API_BASE}/controller-services/{cs_id}/run-status", json=payload
     )
-    nipyapi.canvas.update_processor(
-        fetch_file,
-        nipyapi.nifi.ProcessorConfigDTO(
-            properties={
-                'File to Fetch': '${absolute.path}/${filename}',
-                'Completion Strategy': 'None'
+    resp.raise_for_status()
+    print(f"[+] Controller Service {cs_id} 已啟動啟用")
+
+
+def configure_and_start_put_database_record(
+    processor_id: str, dbcp_id: str, reader_id: str
+):
+    """設定 PutDatabaseRecord 必要屬性並啟動處理器"""
+    proc_detail = requests.get(
+        f"{NIFI_API_BASE}/processors/{processor_id}"
+    ).json()
+    version = proc_detail["revision"]["version"]
+
+    # 補足 4 個缺失的屬性，並設定 autoTerminated 關係避免狀態無效
+    config_payload = {
+        "revision": {"version": version},
+        "component": {
+            "id": processor_id,
+            "config": {
+                "properties": {
+                    "Record Reader": reader_id,
+                    "Database Connection Pooling Service": dbcp_id,
+                    "Statement Type": DB_CONFIG["statement_type"],
+                    "Table Name": DB_CONFIG["table_name"],
+                },
+                "autoTerminatedRelationships": ["success", "failure", "retry"],
             },
-            auto_terminated_relationships=['not.found', 'permission.denied', 'failure']
-        )
+        },
+    }
+
+    update_resp = requests.put(
+        f"{NIFI_API_BASE}/processors/{processor_id}", json=config_payload
+    )
+    update_resp.raise_for_status()
+    print(f"[+] 處理器 {processor_id} 屬性更新完成，驗證錯誤已清除")
+
+    # 取得最新版本號以啟動處理器
+    updated_proc = update_resp.json()
+    latest_version = updated_proc["revision"]["version"]
+
+    # 啟動處理器
+    start_payload = {"revision": {"version": latest_version}, "state": "RUNNING"}
+    start_resp = requests.put(
+        f"{NIFI_API_BASE}/processors/{processor_id}/run-status",
+        json=start_payload,
+    )
+    start_resp.raise_for_status()
+    print(f"[+] 處理器 {processor_id} 已成功運行 (RUNNING)，佇列開始消化")
+
+
+def main():
+    print("=== 開始修正 NiFi Process Group [Local_2_SQL] ===")
+
+    # 1. 建立並啟用 DBCPConnectionPool
+    dbcp_id = create_or_get_dbcp_service(PROCESS_GROUP_ID)
+
+    # 2. 建立並啟用 Record Reader (依資料格式選 'json' 或 'csv')
+    reader_id = create_or_get_record_reader(PROCESS_GROUP_ID, reader_type="json")
+
+    # 稍候服務在 NiFi 內部生效
+    time.sleep(2)
+
+    # 3. 修正 PutDatabaseRecord 缺失屬性並轉為 RUNNING
+    configure_and_start_put_database_record(
+        PUT_DB_PROCESSOR_ID, dbcp_id, reader_id
     )
 
-    # 6. 建立 RouteOnAttribute 處理器
-    route_proc = nipyapi.canvas.create_processor(
-        parent_pg=local_pg,
-        processor=nipyapi.canvas.get_processor_type('RouteOnAttribute'),
-        location=(300, 400),
-        name="Route Table Type"
-    )
-    nipyapi.canvas.update_processor(
-        route_proc,
-        nipyapi.nifi.ProcessorConfigDTO(
-            properties={
-                'Routing Strategy': 'Route to Property name',
-                'matched': "${filename:endsWith('.json')}"
-            },
-            auto_terminated_relationships=['unmatched']
-        )
-    )
+    print("=== 所有錯誤修復完成 ===")
 
-    # 7. 建立 PutDatabaseRecord 處理器 (使用正確的內部屬性鍵值)
-    put_db = nipyapi.canvas.create_processor(
-        parent_pg=local_pg,
-        processor=nipyapi.canvas.get_processor_type('PutDatabaseRecord'),
-        location=(300, 580),
-        name="PutDatabaseRecord to PostgreSQL"
-    )
-    nipyapi.canvas.update_processor(
-        put_db,
-        nipyapi.nifi.ProcessorConfigDTO(
-            properties={
-                'put-db-record-dps': dbcp_service.id,
-                'put-db-record-record-reader': json_reader.id,
-                'put-db-record-statement-type': 'INSERT',
-                'put-db-record-table-name': 'raw_bike_availability',
-                'put-db-record-schema-name': 'public',
-                'put-db-record-translate-field-names': 'true',
-                'put-db-record-unmatched-field-behavior': 'Ignore Unmatched Fields'
-            },
-            auto_terminated_relationships=['success', 'failure', 'retry']
-        )
-    )
 
-    # 8. 連接拓樸路由
-    nipyapi.canvas.create_connection(
-        source=list_file,
-        target=fetch_file,
-        relationships=['success'],
-        name="Listed to Fetch"
-    )
-
-    nipyapi.canvas.create_connection(
-        source=fetch_file,
-        target=route_proc,
-        relationships=['success'],
-        name="Fetched to Route"
-    )
-
-    updated_route = nipyapi.canvas.get_processor(route_proc.id, identifier_type='id')
-    if isinstance(updated_route, list):
-        updated_route = updated_route[0]
-
-    nipyapi.canvas.create_connection(
-        source=updated_route,
-        target=put_db,
-        relationships=['matched'],
-        name="Matched to SQL"
-    )
-
-    return local_pg
+if __name__ == "__main__":
+    main()
