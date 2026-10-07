@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-pgs/local_2_SQL.py - Local_2_SQL 流程圖模組 (精準型別鎖定 + Bulletin 即時排查版)
+pgs/local_2_SQL.py - Local_2_SQL 流程圖模組 (修復 ProcessorTypesEntity 解包與原生寫入完整版)
 """
 
 import os
@@ -45,7 +45,8 @@ def log(msg, level="INFO"):
         "ERR": "[❌ ERROR]",
         "OK": "[✅ SUCCESS]",
         "STEP": "[🚀 STEP]",
-        "DIAG": "[🔍 DIAG]"
+        "DIAG": "[🔍 DIAG]",
+        "INSPECT": "[🔬 INSPECT]"
     }.get(level, f"[{level}]")
     print(f"[DEPLOY-LOG {time.strftime('%H:%M:%S')}] {prefix} {msg}", flush=True)
 
@@ -64,34 +65,39 @@ def parse_api_exception(e):
 
 def get_exact_processor_type(type_name):
     """
-    精確比對並回傳單一 DocumentedTypeDTO，徹底解決 nipyapi 回傳 list 導致的 AssertionError
+    從 FlowApi 提取標準清單並解包 processor_types 屬性，
+    保證回傳符合 create_processor 要求的 DocumentedTypeDTO 實例。
     """
-    log(f"正在向 NiFi 查詢處理器型別: '{type_name}'...", "DIAG")
-    all_types = nipyapi.canvas.list_all_processor_types()
+    log(f"向 NiFi 查詢處理器型別: '{type_name}'...", "DIAG")
+    entity = nipyapi.nifi.FlowApi().get_processor_types()
     
-    # 1. 完整 Package 名稱精確匹配 (例: org.apache.nifi.processors.standard.ReplaceText)
-    for t in all_types:
+    # 提取實體內部封裝的 list 清單
+    types_list = getattr(entity, "processor_types", [])
+    log(f"NiFi 系統註冊的處理器型別總數: {len(types_list)} 項", "INSPECT")
+
+    # 1. 全名精準比對 (例如 org.apache.nifi.processors.standard.ReplaceText)
+    for t in types_list:
         if t.type == type_name:
-            log(f"全名精確匹配成功 -> {t.type}", "OK")
+            log(f"全名匹配成功 -> {t.type}", "OK")
             return t
 
-    # 2. 類別末端後綴精確匹配 (例: .ReplaceText)
-    exact_suffix_matches = [t for t in all_types if t.type.endswith(f".{type_name}")]
-    if exact_suffix_matches:
-        chosen = exact_suffix_matches[0]
-        log(f"後綴精確匹配成功 -> {chosen.type} (候選項總數: {len(exact_suffix_matches)})", "OK")
+    # 2. 後綴精準比對 (例如 .ReplaceText)
+    suffix_matches = [t for t in types_list if t.type.endswith(f".{type_name}")]
+    if suffix_matches:
+        chosen = suffix_matches[0]
+        log(f"後綴匹配成功 -> {chosen.type}", "OK")
         return chosen
 
-    # 3. 若 nipyapi 內建搜尋回傳 list，解包取出第一個合法實例
+    # 3. 備援方案：若 nipyapi 輔助函式可用則提取單一元素
     res = nipyapi.canvas.get_processor_type(type_name)
     if isinstance(res, list) and res:
-        log(f"nipyapi 回傳陣列候選清單，選取標準實例 -> {res[0].type}", "WARN")
+        log(f"備援清單選取首項 -> {res[0].type}", "INSPECT")
         return res[0]
-    elif isinstance(res, nipyapi.nifi.DocumentedTypeDTO):
-        log(f"單一實例解析成功 -> {res.type}", "OK")
+    if isinstance(res, nipyapi.nifi.DocumentedTypeDTO):
+        log(f"備援解析成功 -> {res.type}", "OK")
         return res
 
-    raise ValueError(f"無法在 NiFi 註冊表中定位到處理器型別: {type_name}")
+    raise ValueError(f"無法在 NiFi 中定位處理器型別: {type_name}")
 
 
 def stop_processor_safely(proc):
@@ -256,7 +262,7 @@ def setup_raw_json_pipeline(local_pg, dbcp_svc, table_name="raw_bike_availabilit
     if isinstance(putsql_proc, list):
         putsql_proc = putsql_proc[0]
 
-    # 正確 PutSQL 配置：只指定連線池，不傳入任何不存在的屬性
+    # 正確的 PutSQL 配置：只指定連線池，不傳入任何不存在的屬性
     putsql_props = {
         "JDBC Connection Pool": dbcp_svc.id,
         "Support Fragmented Transactions": "false",
@@ -268,7 +274,7 @@ def setup_raw_json_pipeline(local_pg, dbcp_svc, table_name="raw_bike_availabilit
     putsql_proc = nipyapi.canvas.update_processor(putsql_proc, putsql_proc.component.config)
     log(f"PutSQL 參數更新完成 (UUID: {putsql_proc.id})", "OK")
 
-    # 3. 建立或重用 ReplaceText 處理器 (使用精準型別避免 AssertionError)
+    # 3. 建立或重用 ReplaceText 處理器 (使用解包修正後的型別)
     if not replace_proc:
         log("建立 ReplaceText 處理器...", "STEP")
         replace_type = get_exact_processor_type("ReplaceText")
