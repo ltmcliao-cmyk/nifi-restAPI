@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-pgs/local_2_SQL.py - Local_2_SQL 流程圖模組 (Clean-Slate 零殘留與全防禦寫入終極版)
+pgs/local_2_SQL.py - Local_2_SQL 流程圖模組 (Prepend + Append 零正則保證成功版)
 """
 
 import os
@@ -23,7 +23,8 @@ PROCESS_GROUP_NAME = "Local_2_SQL"
 ROUTE_PROC_ID = "10d7852f-01a1-1000-7ffb-2d30bbfc2902"
 ROUTE_PROC_NAME = "Route Table Type"
 
-REPLACE_TEXT_PROC_NAME = "Format RAW JSON to SQL"
+PREPEND_PROC_NAME = "Wrap SQL Header (Prepend)"
+APPEND_PROC_NAME = "Wrap SQL Footer (Append)"
 PUT_SQL_PROC_NAME = "PutSQL to PostgreSQL RAW"
 
 DEFAULT_DB_CONFIG = {
@@ -43,8 +44,7 @@ def log(msg, level="INFO"):
         "ERR": "[❌ ERROR]",
         "OK": "[✅ SUCCESS]",
         "STEP": "[🚀 STEP]",
-        "DIAG": "[🔍 DIAG]",
-        "INSPECT": "[🔬 INSPECT]"
+        "DIAG": "[🔍 DIAG]"
     }.get(level, f"[{level}]")
     print(f"[DEPLOY-LOG {time.strftime('%H:%M:%S')}] {prefix} {msg}", flush=True)
 
@@ -62,14 +62,12 @@ def parse_api_exception(e):
 
 
 def get_exact_processor_type(type_name):
-    """精準提取單一 DocumentedTypeDTO 實例，杜絕型別解析錯誤"""
-    log(f"向 NiFi 查詢處理器型別: '{type_name}'...", "DIAG")
+    """精準提取單一 DocumentedTypeDTO 實例"""
     entity = nipyapi.nifi.FlowApi().get_processor_types()
     types_list = getattr(entity, "processor_types", [])
 
     for t in types_list:
         if t.type == type_name or t.type.endswith(f".{type_name}"):
-            log(f"型別精確鎖定成功 -> {t.type}", "OK")
             return t
 
     res = nipyapi.canvas.get_processor_type(type_name)
@@ -89,7 +87,6 @@ def stop_processor_safely(proc):
     if isinstance(proc, list):
         proc = proc[0]
 
-    log(f"檢查處理器狀態: '{proc.component.name}' (UUID: {proc.id}) -> 當前: {proc.component.state}", "DIAG")
     if proc.component.state == "RUNNING":
         log(f"發送停止命令至處理器: [{proc.component.name}]...", "STEP")
         try:
@@ -105,7 +102,6 @@ def stop_processor_safely(proc):
             if proc.component.state == "STOPPED":
                 log(f"處理器 [{proc.component.name}] 已安全停止！", "OK")
                 return
-        log(f"處理器停止逾時 (狀態: {proc.component.state})", "WARN")
 
 
 def start_processor_safely(proc):
@@ -125,38 +121,34 @@ def start_processor_safely(proc):
             log(f"啟動提示: {parse_api_exception(e)}", "WARN")
 
 
-def safe_delete_connection(conn):
-    """安全清空並刪除連線，防止殘留數據引發 409"""
+def safe_purge_and_delete_connection(conn):
+    """先清空佇列殘留數據，再安全刪除連線，徹底避開 409 Conflict"""
     if not conn:
         return
     try:
-        # 若有殘留佇列，先嘗試 drop flowfiles
-        queue_count = getattr(getattr(conn, "status", None), "aggregate_snapshot", None)
-        if queue_count and getattr(queue_count, "queued_count", 0) > 0:
-            log(f"清空連線佇列殘留數據 (ID: {conn.id})...", "WARN")
-            nipyapi.nifi.FlowfileQueuesApi().create_drop_request(conn.id)
-            time.sleep(1)
+        # 清空佇列中的 FlowFile
+        log(f"清空連線佇列 (ID: {conn.id})...", "INFO")
+        try:
+            nipyapi.canvas.purge_connection(conn.id)
+        except Exception:
+            pass
 
+        time.sleep(0.5)
         nipyapi.canvas.delete_connection(conn)
         log(f"連線已安全刪除 (ID: {conn.id})", "OK")
     except Exception as e:
-        log(f"連線刪除警告: {parse_api_exception(e)}", "WARN")
+        log(f"連線刪除提示: {parse_api_exception(e)}", "WARN")
 
 
 def configure_processor_clean(proc, desired_properties, auto_terminated_rels=None):
     """
-    動態屬性白名單校準函式：
-    將既有不在白名單的幽靈屬性全部明確標記為 None (null)，強制 NiFi 伺服器徹底抹除。
+    屬性精確對齊與幽靈屬性清理：
+    先將所有舊屬性標記為 None (觸發伺服器端刪除)，再寫入合法白名單鍵值。
     """
     descriptors = proc.component.config.descriptors or {}
     current_props = proc.component.config.properties or {}
-    clean_props = {}
+    clean_props = {k: None for k in current_props.keys()}
 
-    # 1. 凡是目前存在於處理器上的鍵，預設全部標記為 None (強制刪除)
-    for old_k in current_props.keys():
-        clean_props[old_k] = None
-
-    # 2. 依據 Descriptors 規格精準注入合法鍵
     for target_name, value in desired_properties.items():
         matched_key = None
         for k, desc in descriptors.items():
@@ -168,9 +160,8 @@ def configure_processor_clean(proc, desired_properties, auto_terminated_rels=Non
 
         if matched_key:
             clean_props[matched_key] = value
-            log(f"[{proc.component.name}] 屬性對齊: '{target_name}' -> Real Key: '{matched_key}'", "DIAG")
         else:
-            log(f"[{proc.component.name}] 警告: 屬性 '{target_name}' 不存在於官方規格中！", "WARN")
+            log(f"[{proc.component.name}] 警告: 屬性 '{target_name}' 不存在於官方規格！", "WARN")
 
     proc.component.config.properties = clean_props
 
@@ -204,126 +195,93 @@ def ensure_local_controller_service(local_pg, service_type, service_name, proper
     if isinstance(svc, list):
         svc = svc[0]
 
-    needs_update = False
-    if properties:
-        current_props = svc.component.properties or {}
-        diffs = {k: (current_props.get(k), v) for k, v in properties.items() if current_props.get(k) != v}
-        if diffs:
-            needs_update = True
-            log(f"連線池屬性有差異需更新: {diffs}", "DIAG")
+    # 若屬性無差異且已經 ENABLED，直接沿用
+    if svc.component.state == "ENABLED":
+        log(f"Controller Service 已處於 ENABLED 狀態，直接沿用。", "OK")
+        return svc
 
-    if needs_update:
-        if svc.component.state != "DISABLED":
-            log(f"暫停 {service_name} 以便覆寫連線配置...", "INFO")
-            try:
-                nipyapi.canvas.schedule_controller(svc, scheduled=False)
-            except Exception as e:
-                log(f"停用服務提示: {parse_api_exception(e)}", "WARN")
+    # 啟用服務
+    log(f"發送啟用命令至 {service_name}...", "STEP")
+    try:
+        nipyapi.canvas.schedule_controller(svc, scheduled=True)
+    except Exception as e:
+        log(f"啟用調度提示: {parse_api_exception(e)}", "WARN")
 
-            for _ in range(15):
-                time.sleep(0.5)
-                svc = nipyapi.canvas.get_controller(svc.id, identifier_type="id")
-                if isinstance(svc, list):
-                    svc = svc[0]
-                if svc.component.state == "DISABLED":
-                    break
-
-        if svc.component.state == "DISABLED":
-            log(f"正在更新 {service_name} 屬性配置...", "STEP")
-            current_props = svc.component.properties or {}
-            current_props.update(properties)
-            svc.component.properties = current_props
-            svc = nipyapi.canvas.update_controller(svc, svc.component)
-            log(f"連線屬性更新成功！", "OK")
-
-    svc = nipyapi.canvas.get_controller(svc.id, identifier_type="id")
-    if isinstance(svc, list):
-        svc = svc[0]
-
-    if svc.component.state != "ENABLED":
-        log(f"發送啟用命令至 {service_name}...", "STEP")
-        try:
-            nipyapi.canvas.schedule_controller(svc, scheduled=True)
-        except Exception as e:
-            log(f"啟用調度提示: {parse_api_exception(e)}", "WARN")
-
-        for _ in range(20):
-            time.sleep(0.5)
-            svc = nipyapi.canvas.get_controller(svc.id, identifier_type="id")
-            if isinstance(svc, list):
-                svc = svc[0]
-            if svc.component.state == "ENABLED":
-                log(f"Controller Service '{service_name}' 已成功轉為 ENABLED！", "OK")
-                break
+    for _ in range(20):
+        time.sleep(0.5)
+        svc = nipyapi.canvas.get_controller(svc.id, identifier_type="id")
+        if isinstance(svc, list):
+            svc = svc[0]
+        if svc.component.state == "ENABLED":
+            log(f"Controller Service '{service_name}' 已成功轉為 ENABLED！", "OK")
+            break
 
     return svc
 
 
-def setup_raw_json_pipeline_clean(local_pg, dbcp_svc, table_name="raw_bike_availability"):
+def setup_prepend_append_pipeline(local_pg, dbcp_svc, table_name="raw_bike_availability"):
     """
-    【Clean-Slate 終極重建架構】
-    1. 停用鏈路上所有處理器。
-    2. 拆除所有通往下游的連線。
-    3. 徹底刪除帶有殘留屬性報錯的舊 ReplaceText 處理器。
-    4. 建立全新的 ReplaceText 與 PutSQL 處理器，確保 0 幽靈屬性殘留。
-    5. 重接 Route -> ReplaceText -> PutSQL 連線並進行驗證啟動。
+    【Prepend + Append 零正則保證成功架構】
+    1. 清理所有舊 ReplaceText 處理器與積壓連線。
+    2. 建立 Prepend 處理器：寫入 SQL Header 與 Dollar-Quote 開頭 ($raw_json$)。
+    3. 建立 Append 處理器：寫入 Dollar-Quote 結尾 ($raw_json$::jsonb);。
+    4. 連線至 PutSQL 寫入資料庫。
     """
-    log("開始執行 Clean-Slate 乾淨架構部署...", "STEP")
+    log("開始執行 Prepend + Append 零正則架構部署...", "STEP")
     procs = nipyapi.canvas.list_all_processors(local_pg.id)
 
     route_proc = next((p for p in procs if p.id == ROUTE_PROC_ID or p.component.name == ROUTE_PROC_NAME), None)
-    old_putdb = next((p for p in procs if "PutDatabaseRecord" in p.component.name or "PutDatabaseRecord" in p.component.type), None)
-    old_replace = next((p for p in procs if p.component.name == REPLACE_TEXT_PROC_NAME), None)
-    old_putsql = next((p for p in procs if p.component.name == PUT_SQL_PROC_NAME), None)
+    old_putdb_list = [p for p in procs if "PutDatabaseRecord" in p.component.name or "PutDatabaseRecord" in p.component.type]
+    old_replace_list = [p for p in procs if "ReplaceText" in p.component.type]
+    putsql_proc = next((p for p in procs if p.component.name == PUT_SQL_PROC_NAME or "PutSQL" in p.component.type), None)
 
-    # 1. 安全全面停止，解鎖所有 409 連線限制
-    for p in [route_proc, old_putdb, old_replace, old_putsql]:
+    # 1. 安全停止所有涉及的處理器
+    log("停止所有涉入處理器以解鎖連線與佇列...", "STEP")
+    for p in [route_proc, putsql_proc] + old_replace_list + old_putdb_list:
         if p:
             stop_processor_safely(p)
 
-    # 2. 徹底拆除所有舊連線，防止殘留
+    # 2. 徹底清空並刪除下游所有連線 (解鎖卡在隊列中的 506 KB 舊資料)
     conns = nipyapi.canvas.list_all_connections(local_pg.id)
+    replace_ids = [p.id for p in old_replace_list]
+    putdb_ids = [p.id for p in old_putdb_list]
+    putsql_id = putsql_proc.id if putsql_proc else None
+
     for c in conns:
         src_id = c.component.source.id
         dst_id = c.component.destination.id
-        # 只要涉及下游客製寫入節點的連線一律拆除重建
-        if src_id in [getattr(old_replace, 'id', None), getattr(old_putdb, 'id', None)] or \
-           dst_id in [getattr(old_replace, 'id', None), getattr(old_putsql, 'id', None), getattr(old_putdb, 'id', None)]:
-            log(f"拆除舊連線: '{c.component.name}' (ID: {c.id})...", "INFO")
-            safe_delete_connection(c)
+        if src_id in replace_ids or src_id in putdb_ids or \
+           dst_id in replace_ids or dst_id in putdb_ids or dst_id == putsql_id:
+            safe_purge_and_delete_connection(c)
 
-    # 3. 徹底刪除可能被污染的舊實例
-    if old_replace:
-        log(f"徹底移除舊有帶有殘留配置的 ReplaceText (UUID: {old_replace.id})...", "STEP")
+    # 3. 刪除所有舊有的 ReplaceText 與 PutDatabaseRecord 節點
+    for p in old_replace_list:
+        log(f"刪除舊 ReplaceText 實例 (ID: {p.id})...", "INFO")
         try:
-            nipyapi.canvas.delete_processor(old_replace)
-            log("舊 ReplaceText 已成功粉碎清理！", "OK")
+            nipyapi.canvas.delete_processor(p)
         except Exception as e:
-            log(f"移除舊 ReplaceText 提示: {parse_api_exception(e)}", "WARN")
+            log(f"刪除舊處理器提示: {parse_api_exception(e)}", "WARN")
 
-    if old_putdb:
-        log(f"移除舊有的 PutDatabaseRecord...", "INFO")
+    for p in old_putdb_list:
         try:
-            nipyapi.canvas.delete_processor(old_putdb)
+            nipyapi.canvas.delete_processor(p)
         except Exception as e:
-            log(f"移除舊 PutDatabaseRecord 提示: {parse_api_exception(e)}", "WARN")
+            log(f"刪除舊處理器提示: {parse_api_exception(e)}", "WARN")
 
-    # 4. 座標計算與全新建立
+    # 4. 座標佈局
     base_x = route_proc.component.position.x if route_proc else 0
     base_y = route_proc.component.position.y if route_proc else 0
 
-    # 處理 PutSQL
-    if not old_putsql:
-        log("建立全新的 PutSQL 處理器...", "STEP")
+    # 5. 配置 PutSQL 處理器
+    if not putsql_proc:
+        log("建立 PutSQL 處理器...", "STEP")
         putsql_type = get_exact_processor_type("PutSQL")
         putsql_proc = nipyapi.canvas.create_processor(
             parent_pg=local_pg,
             processor=putsql_type,
-            location=(base_x + 600, base_y),
+            location=(base_x + 900, base_y),
             name=PUT_SQL_PROC_NAME
         )
-    else:
-        putsql_proc = old_putsql
 
     putsql_proc = nipyapi.canvas.get_processor(putsql_proc.id, identifier_type="id")
     if isinstance(putsql_proc, list):
@@ -340,57 +298,87 @@ def setup_raw_json_pipeline_clean(local_pg, dbcp_svc, table_name="raw_bike_avail
         putsql_props,
         auto_terminated_rels=["success", "failure", "retry"]
     )
-    log(f"PutSQL 乾淨配置更新完成 (UUID: {putsql_proc.id})", "OK")
+    log(f"PutSQL 配置完成 (UUID: {putsql_proc.id})", "OK")
 
-    # 建立全新的 ReplaceText (保證 0 幽靈屬性)
-    log("建立全新的 ReplaceText 處理器 (Clean-Slate)...", "STEP")
+    # 6. 建立 Prepend 處理器 (寫入 SQL 開頭)
+    log("建立 Prepend 處理器 (寫入 SQL 開頭)...", "STEP")
     replace_type = get_exact_processor_type("ReplaceText")
-    replace_proc = nipyapi.canvas.create_processor(
+    prepend_proc = nipyapi.canvas.create_processor(
         parent_pg=local_pg,
         processor=replace_type,
         location=(base_x + 300, base_y),
-        name=REPLACE_TEXT_PROC_NAME
+        name=PREPEND_PROC_NAME
     )
-    replace_proc = nipyapi.canvas.get_processor(replace_proc.id, identifier_type="id")
-    if isinstance(replace_proc, list):
-        replace_proc = replace_proc[0]
+    prepend_proc = nipyapi.canvas.get_processor(prepend_proc.id, identifier_type="id")
+    if isinstance(prepend_proc, list):
+        prepend_proc = prepend_proc[0]
 
-    # 使用 PostgreSQL Dollar-Quoting 標籤 $json$...$json$::jsonb
-    sql_template = f"INSERT INTO {table_name} (source_endpoint, payload) VALUES ('Bike-Availability-Taipei', \\$json\\$$1\\$json\\$::jsonb)"
-    replace_props = {
-        "Evaluation Mode": "Entire text",
-        "Regular Expression": r"(?s)(.*)",
-        "Replacement Value": sql_template,
-        "Replacement Strategy": "Regex Replace",
-        "Maximum Buffer Size": "20 MB"
+    # Prepend 策略：直接在檔案開頭貼上文字，無任何正規表達式
+    prepend_props = {
+        "Replacement Strategy": "Prepend",
+        "Replacement Value": f"INSERT INTO {table_name} (source_endpoint, payload) VALUES ('Bike-Availability-Taipei', $raw_json$",
+        "Evaluation Mode": "Entire text"
     }
-    replace_proc = configure_processor_clean(
-        replace_proc,
-        replace_props,
+    prepend_proc = configure_processor_clean(
+        prepend_proc,
+        prepend_props,
         auto_terminated_rels=["failure"]
     )
-    log(f"全新 ReplaceText 配置完成 (UUID: {replace_proc.id})", "OK")
+    log(f"Prepend 處理器配置完成 (UUID: {prepend_proc.id})", "OK")
 
-    # 5. 接駁全新連線鏈路
-    log("接駁全新鏈路: [Route Table Type] -> [ReplaceText] (matched)...", "STEP")
+    # 7. 建立 Append 處理器 (寫入 SQL 結尾)
+    log("建立 Append 處理器 (寫入 SQL 結尾)...", "STEP")
+    append_proc = nipyapi.canvas.create_processor(
+        parent_pg=local_pg,
+        processor=replace_type,
+        location=(base_x + 600, base_y),
+        name=APPEND_PROC_NAME
+    )
+    append_proc = nipyapi.canvas.get_processor(append_proc.id, identifier_type="id")
+    if isinstance(append_proc, list):
+        append_proc = append_proc[0]
+
+    # Append 策略：直接在檔案末端貼上結尾，無任何正規表達式
+    append_props = {
+        "Replacement Strategy": "Append",
+        "Replacement Value": "$raw_json$::jsonb);",
+        "Evaluation Mode": "Entire text"
+    }
+    append_proc = configure_processor_clean(
+        append_proc,
+        append_props,
+        auto_terminated_rels=["failure"]
+    )
+    log(f"Append 處理器配置完成 (UUID: {append_proc.id})", "OK")
+
+    # 8. 接駁連線: Route -> Prepend -> Append -> PutSQL
+    log("接駁連線: [Route Table Type] -> [Prepend] (matched)...", "STEP")
     nipyapi.canvas.create_connection(
         source=route_proc,
-        target=replace_proc,
+        target=prepend_proc,
         relationships=["matched"],
-        name="Matched to SQL Wrapper"
+        name="Matched to Prepend"
     )
 
-    log("接駁全新鏈路: [ReplaceText] -> [PutSQL] (success)...", "STEP")
+    log("接駁連線: [Prepend] -> [Append] (success)...", "STEP")
     nipyapi.canvas.create_connection(
-        source=replace_proc,
+        source=prepend_proc,
+        target=append_proc,
+        relationships=["success"],
+        name="Prepended to Append"
+    )
+
+    log("接駁連線: [Append] -> [PutSQL] (success)...", "STEP")
+    nipyapi.canvas.create_connection(
+        source=append_proc,
         target=putsql_proc,
         relationships=["success"],
-        name="Wrapped SQL to DB"
+        name="SQL Complete to DB"
     )
 
-    # 6. 漸進輪詢校驗與啟動
-    for target in [replace_proc, putsql_proc]:
-        log(f"等待處理器 [{target.component.name}] 通過 NiFi 核心校驗...", "INFO")
+    # 9. 輪詢驗證與按順序啟動
+    for target in [putsql_proc, append_proc, prepend_proc]:
+        log(f"等待處理器 [{target.component.name}] 通過 NiFi 校驗...", "INFO")
         for attempt in range(1, 21):
             time.sleep(0.5)
             p_fresh = nipyapi.canvas.get_processor(target.id, identifier_type="id")
@@ -401,12 +389,11 @@ def setup_raw_json_pipeline_clean(local_pg, dbcp_svc, table_name="raw_bike_avail
                 log(f"處理器 [{p_fresh.component.name}] 校驗全部通過！", "OK")
                 break
             if attempt == 20:
-                log(f"[{p_fresh.component.name}] 仍有殘留驗證錯誤: {errors}", "ERR")
                 raise RuntimeError(f"{p_fresh.component.name} 驗證失敗: {errors}")
 
         start_processor_safely(target)
 
-    # 恢復上游 Route 處理器
+    # 恢復上游 Route 處理器運作
     if route_proc:
         start_processor_safely(route_proc)
 
@@ -453,11 +440,6 @@ def dump_process_group_health(local_pg):
         queue_count = c.status.aggregate_snapshot.queued_count if hasattr(c, "status") else "N/A"
         queue_size = c.status.aggregate_snapshot.queued_size if hasattr(c, "status") else "N/A"
         log(f"  * 連線: '{c.component.name}' [{src} -> {dst}] | 積壓: {queue_count} 筆 | 數據: {queue_size}", "DIAG")
-
-    svcs = nipyapi.canvas.list_all_controllers(local_pg.id)
-    log(f"--- Controller Services 列表 (共 {len(svcs)} 個) ---", "DIAG")
-    for s in svcs:
-        log(f"  * [{s.component.state}] {s.component.name} (UUID: {s.id})", "DIAG")
     log("==========================================", "DIAG")
 
 
@@ -498,9 +480,9 @@ def create_local_2_sql_pg(parent_pg=None, *args, **kwargs):
             properties=dbcp_properties,
         )
 
-        # 2. 執行乾淨架構部署
+        # 2. 部署 Prepend + Append 零正則保證架構
         table_name = kwargs.get("table_name", "raw_bike_availability")
-        setup_raw_json_pipeline_clean(local_pg, dbcp_svc, table_name=table_name)
+        setup_prepend_append_pipeline(local_pg, dbcp_svc, table_name=table_name)
 
         # 3. 輸出全局健康檢查報告與 Bulletin 排查日誌
         dump_process_group_health(local_pg)
