@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-pgs/local_2_SQL.py - Local_2_SQL 流程圖模組 (ReplaceText + PutSQL RAW JSONB 完整落地方案)
+pgs/local_2_SQL.py - Local_2_SQL 流程圖模組 (精準型別鎖定 + Bulletin 即時排查版)
 """
 
 import os
@@ -60,6 +60,38 @@ def parse_api_exception(e):
             pass
         return f"Status: {getattr(e, 'status', 'N/A')}, Reason: {getattr(e, 'reason', 'N/A')}, Body: {body}"
     return str(e)
+
+
+def get_exact_processor_type(type_name):
+    """
+    精確比對並回傳單一 DocumentedTypeDTO，徹底解決 nipyapi 回傳 list 導致的 AssertionError
+    """
+    log(f"正在向 NiFi 查詢處理器型別: '{type_name}'...", "DIAG")
+    all_types = nipyapi.canvas.list_all_processor_types()
+    
+    # 1. 完整 Package 名稱精確匹配 (例: org.apache.nifi.processors.standard.ReplaceText)
+    for t in all_types:
+        if t.type == type_name:
+            log(f"全名精確匹配成功 -> {t.type}", "OK")
+            return t
+
+    # 2. 類別末端後綴精確匹配 (例: .ReplaceText)
+    exact_suffix_matches = [t for t in all_types if t.type.endswith(f".{type_name}")]
+    if exact_suffix_matches:
+        chosen = exact_suffix_matches[0]
+        log(f"後綴精確匹配成功 -> {chosen.type} (候選項總數: {len(exact_suffix_matches)})", "OK")
+        return chosen
+
+    # 3. 若 nipyapi 內建搜尋回傳 list，解包取出第一個合法實例
+    res = nipyapi.canvas.get_processor_type(type_name)
+    if isinstance(res, list) and res:
+        log(f"nipyapi 回傳陣列候選清單，選取標準實例 -> {res[0].type}", "WARN")
+        return res[0]
+    elif isinstance(res, nipyapi.nifi.DocumentedTypeDTO):
+        log(f"單一實例解析成功 -> {res.type}", "OK")
+        return res
+
+    raise ValueError(f"無法在 NiFi 註冊表中定位到處理器型別: {type_name}")
 
 
 def stop_processor_safely(proc):
@@ -185,8 +217,8 @@ def ensure_local_controller_service(local_pg, service_type, service_name, proper
 def setup_raw_json_pipeline(local_pg, dbcp_svc, table_name="raw_bike_availability"):
     """
     配置 ReplaceText + PutSQL 管線：
-    1. ReplaceText 將 FlowFile 內容轉為 PostgreSQL Dollar-Quoted INSERT 語法
-    2. PutSQL 執行內容寫入，完全移除無效的 'SQL Statement' 屬性
+    1. ReplaceText 將 FlowFile 內容包裝為 PostgreSQL Dollar-Quoted INSERT 語法
+    2. PutSQL 執行寫入
     """
     log("開始配置 ReplaceText + PutSQL 原生寫入管線", "STEP")
     procs = nipyapi.canvas.list_all_processors(local_pg.id)
@@ -196,7 +228,7 @@ def setup_raw_json_pipeline(local_pg, dbcp_svc, table_name="raw_bike_availabilit
     replace_proc = next((p for p in procs if p.component.name == REPLACE_TEXT_PROC_NAME), None)
     putsql_proc = next((p for p in procs if p.component.name == PUT_SQL_PROC_NAME or "PutSQL" in p.component.type), None)
 
-    # 1. 安全停止上游與舊處理器，解除 409 連線操作鎖定
+    # 1. 安全停止上游與既有處理器，解除 409 連線鎖定
     if route_proc:
         stop_processor_safely(route_proc)
     if old_putdb_proc:
@@ -206,15 +238,16 @@ def setup_raw_json_pipeline(local_pg, dbcp_svc, table_name="raw_bike_availabilit
     if putsql_proc:
         stop_processor_safely(putsql_proc)
 
-    # 2. 建立或更新 PutSQL 處理器 (移除所有不支援的屬性)
+    # 2. 建立或重用 PutSQL 處理器
     base_x = route_proc.component.position.x if route_proc else 0
     base_y = route_proc.component.position.y if route_proc else 0
 
     if not putsql_proc:
-        log(f"建立 PutSQL 處理器...", "STEP")
+        log("建立 PutSQL 處理器...", "STEP")
+        putsql_type = get_exact_processor_type("PutSQL")
         putsql_proc = nipyapi.canvas.create_processor(
             parent_pg=local_pg,
-            processor=nipyapi.canvas.get_processor_type("PutSQL"),
+            processor=putsql_type,
             location=(base_x + 600, base_y),
             name=PUT_SQL_PROC_NAME
         )
@@ -223,7 +256,7 @@ def setup_raw_json_pipeline(local_pg, dbcp_svc, table_name="raw_bike_availabilit
     if isinstance(putsql_proc, list):
         putsql_proc = putsql_proc[0]
 
-    # 正確的 PutSQL 配置：只指定連線池，不傳入任何無效的 SQL Statement 屬性
+    # 正確 PutSQL 配置：只指定連線池，不傳入任何不存在的屬性
     putsql_props = {
         "JDBC Connection Pool": dbcp_svc.id,
         "Support Fragmented Transactions": "false",
@@ -233,14 +266,15 @@ def setup_raw_json_pipeline(local_pg, dbcp_svc, table_name="raw_bike_availabilit
     putsql_proc.component.config.properties = putsql_props
     putsql_proc.component.config.auto_terminated_relationships = ["success", "failure", "retry"]
     putsql_proc = nipyapi.canvas.update_processor(putsql_proc, putsql_proc.component.config)
-    log(f"PutSQL 參數配置更新完成 (UUID: {putsql_proc.id})", "OK")
+    log(f"PutSQL 參數更新完成 (UUID: {putsql_proc.id})", "OK")
 
-    # 3. 建立或更新 ReplaceText 處理器 (將 FlowFile 內容包裝為 SQL)
+    # 3. 建立或重用 ReplaceText 處理器 (使用精準型別避免 AssertionError)
     if not replace_proc:
-        log(f"建立 ReplaceText 處理器...", "STEP")
+        log("建立 ReplaceText 處理器...", "STEP")
+        replace_type = get_exact_processor_type("ReplaceText")
         replace_proc = nipyapi.canvas.create_processor(
             parent_pg=local_pg,
-            processor=nipyapi.canvas.get_processor_type("ReplaceText"),
+            processor=replace_type,
             location=(base_x + 300, base_y),
             name=REPLACE_TEXT_PROC_NAME
         )
@@ -249,7 +283,7 @@ def setup_raw_json_pipeline(local_pg, dbcp_svc, table_name="raw_bike_availabilit
     if isinstance(replace_proc, list):
         replace_proc = replace_proc[0]
 
-    # 利用 Java Regex 的 \\$\\$ 轉義輸出 PostgreSQL $$，完全避免 JSON 內單引號衝突
+    # 利用 Java Regex 的 \\$\\$ 轉義輸出 PostgreSQL $$，直接將整份 FlowFile 內容轉入 JSONB
     sql_template = f"INSERT INTO {table_name} (source_endpoint, payload) VALUES ('Bike-Availability-Taipei', \\$\\$$0\\$\\$::jsonb);"
     replace_props = {
         "Evaluation Mode": "Entire text",
@@ -261,12 +295,12 @@ def setup_raw_json_pipeline(local_pg, dbcp_svc, table_name="raw_bike_availabilit
     replace_proc.component.config.properties = replace_props
     replace_proc.component.config.auto_terminated_relationships = ["failure"]
     replace_proc = nipyapi.canvas.update_processor(replace_proc, replace_proc.component.config)
-    log(f"ReplaceText 參數配置更新完成 (UUID: {replace_proc.id})", "OK")
+    log(f"ReplaceText 參數更新完成 (UUID: {replace_proc.id})", "OK")
 
     # 4. 重新接駁連線 (Route Table Type -> ReplaceText -> PutSQL)
     conns = nipyapi.canvas.list_all_connections(local_pg.id)
     
-    # 移除直接從 Route 到舊處理器或 PutSQL 的舊連線
+    # 移除直接從 Route 到舊處理器或直通 PutSQL 的舊連線
     for c in conns:
         if c.component.source.id == route_proc.id and c.component.destination.id != replace_proc.id:
             log(f"刪除直通舊連線: '{c.component.name}' (ID: {c.id})...", "INFO")
@@ -299,8 +333,9 @@ def setup_raw_json_pipeline(local_pg, dbcp_svc, table_name="raw_bike_availabilit
     # 5. 安全刪除已被完全取代的舊 PutDatabaseRecord 處理器
     if old_putdb_proc:
         try:
-            log(f"安全移除舊的 PutDatabaseRecord 處理器...", "INFO")
+            log(f"移除已被取代的 PutDatabaseRecord 處理器...", "INFO")
             nipyapi.canvas.delete_processor(old_putdb_proc)
+            log("舊處理器已成功移除！", "OK")
         except Exception as e:
             log(f"移除舊處理器提示: {parse_api_exception(e)}", "WARN")
 
@@ -324,6 +359,28 @@ def setup_raw_json_pipeline(local_pg, dbcp_svc, table_name="raw_bike_availabilit
     # 恢復上游 Route 處理器
     if route_proc:
         start_processor_safely(route_proc)
+
+
+def fetch_latest_bulletins(local_pg):
+    """抓取最新 Bulletin 日誌，協助排查資料庫寫入細節"""
+    log("查詢 NiFi 最新 Bulletins (即時錯誤與警告記錄)...", "DIAG")
+    try:
+        bulletin_board = nipyapi.nifi.FlowApi().get_bulletin_board()
+        bulletins = bulletin_board.bulletin_board.bulletins or []
+        local_bulletins = [b for b in bulletins if getattr(b, "group_id", None) == local_pg.id]
+
+        if not local_bulletins:
+            log("當前 Process Group 無任何異常 Bulletin 警告！", "OK")
+            return
+
+        log(f"發現 {len(local_bulletins)} 筆相關 Bulletin 訊息:", "WARN")
+        for b in local_bulletins[-5:]:
+            src = getattr(b, "source_name", "Unknown Source")
+            level = getattr(b, "level", "INFO")
+            msg = getattr(b, "message", "")
+            log(f"  [{level}] 來源: {src} -> 內容: {msg}", "DIAG")
+    except Exception as e:
+        log(f"抓取 Bulletin 失敗: {e}", "WARN")
 
 
 def dump_process_group_health(local_pg):
@@ -395,8 +452,9 @@ def create_local_2_sql_pg(parent_pg=None, *args, **kwargs):
         table_name = kwargs.get("table_name", "raw_bike_availability")
         setup_raw_json_pipeline(local_pg, dbcp_svc, table_name=table_name)
 
-        # 3. 輸出全局健康檢查報告
+        # 3. 輸出全局健康檢查報告與 Bulletin 排查日誌
         dump_process_group_health(local_pg)
+        fetch_latest_bulletins(local_pg)
 
         log("==========================================", "OK")
         log("=== [FINISH] Local_2_SQL 部署全部順利完成 ===", "OK")
