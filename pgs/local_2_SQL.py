@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-pgs/local_2_SQL.py - Local_2_SQL 流程圖模組 (改用 PutSQL 原生寫入 RAW JSONB 修正版)
+pgs/local_2_SQL.py - Local_2_SQL 流程圖模組 (解決 409/400 依賴衝突與原生寫入 RAW JSONB 修復版)
 """
 
 import os
@@ -36,8 +36,33 @@ def log(msg):
     print(f"[DEPLOY-LOG {time.strftime('%H:%M:%S')}] {msg}", flush=True)
 
 
+def stop_processor_safely(proc):
+    """安全停止指定處理器，並等待至 STOPPED 狀態"""
+    if not proc:
+        return
+    proc = nipyapi.canvas.get_processor(proc.id, identifier_type="id")
+    if isinstance(proc, list):
+        proc = proc[0]
+
+    if proc.component.state == "RUNNING":
+        log(f"-> 偵測到處理器 [{proc.component.name}] 正在運行，執行停止以解除資源鎖定...")
+        try:
+            nipyapi.canvas.schedule_processor(proc, scheduled=False)
+        except Exception as e:
+            log(f"   [WARN] 停止處理器提示: {e}")
+
+        for _ in range(15):
+            time.sleep(0.5)
+            proc = nipyapi.canvas.get_processor(proc.id, identifier_type="id")
+            if isinstance(proc, list):
+                proc = proc[0]
+            if proc.component.state == "STOPPED":
+                log(f"[SUCCESS] 處理器 [{proc.component.name}] 已安全停止！")
+                break
+
+
 def ensure_local_controller_service(local_pg, service_type, service_name, properties=None):
-    """在 Local PG 建立並啟用 DBCP Controller Service"""
+    """在 Local PG 建立並啟用 Controller Service，具備冪等性避免 409 Conflict"""
     log(f"--- 檢查 Controller Service: {service_name} ---")
     services = nipyapi.canvas.list_all_controllers(local_pg.id)
     svc = next((s for s in services if s.component.name == service_name), None)
@@ -57,24 +82,41 @@ def ensure_local_controller_service(local_pg, service_type, service_name, proper
     if isinstance(svc, list):
         svc = svc[0]
 
-    # 更新屬性
+    # 檢查屬性是否已有更動（若一致且已啟用，直接跳過避免觸發 409/400）
+    needs_update = False
     if properties:
-        if svc.component.state == "ENABLED":
-            log(f"-> 暫停 {service_name} 以便更新連線屬性...")
+        current_props = svc.component.properties or {}
+        for k, v in properties.items():
+            if current_props.get(k) != v:
+                needs_update = True
+                break
+
+    if needs_update:
+        if svc.component.state != "DISABLED":
+            log(f"-> 屬性需要更新，正在停止 {service_name}...")
             try:
                 nipyapi.canvas.schedule_controller(svc, scheduled=False)
             except Exception as e:
-                log(f"   [WARN] 暫停服務提示: {e}")
-            time.sleep(1)
-            svc = nipyapi.canvas.get_controller(svc.id, identifier_type="id")
-            if isinstance(svc, list):
-                svc = svc[0]
+                log(f"   [WARN] 停用服務指令提示: {e}")
 
-        log(f"-> 正在更新 {service_name} 屬性...")
-        current_props = svc.component.properties or {}
-        current_props.update(properties)
-        svc.component.properties = current_props
-        svc = nipyapi.canvas.update_controller(svc, svc.component)
+            for _ in range(15):
+                time.sleep(0.5)
+                svc = nipyapi.canvas.get_controller(svc.id, identifier_type="id")
+                if isinstance(svc, list):
+                    svc = svc[0]
+                if svc.component.state == "DISABLED":
+                    break
+
+        if svc.component.state == "DISABLED":
+            log(f"-> 正在更新 {service_name} 屬性...")
+            current_props = svc.component.properties or {}
+            current_props.update(properties)
+            svc.component.properties = current_props
+            svc = nipyapi.canvas.update_controller(svc, svc.component)
+        else:
+            log(f"[WARN] 服務未能轉為 DISABLED (目前狀態: {svc.component.state})，略過屬性更新以防 400 錯誤。")
+    else:
+        log(f"-> 屬性無變更，跳過更新以保持連線穩定。")
 
     # 啟用服務
     svc = nipyapi.canvas.get_controller(svc.id, identifier_type="id")
@@ -88,7 +130,7 @@ def ensure_local_controller_service(local_pg, service_type, service_name, proper
         except Exception as e:
             log(f"   [WARN] 啟用調度提示: {e}")
 
-        for attempt in range(1, 21):
+        for _ in range(20):
             time.sleep(0.5)
             svc = nipyapi.canvas.get_controller(svc.id, identifier_type="id")
             if isinstance(svc, list):
@@ -104,7 +146,7 @@ def switch_to_putsql_processor(local_pg, dbcp_svc, table_name="raw_bike_availabi
     """
     將原處理器轉換/替換為 PutSQL，直接將整份 FlowFile 寫入 payload JSONB
     """
-    log("--- 開始設定 PutSQL 處理器 (RAW JSONB 寫入) ---")
+    log("--- 開始配置 PutSQL 處理器 (RAW JSONB 寫入模式) ---")
     proc = nipyapi.canvas.get_processor(PUT_DB_PROC_ID, identifier_type="id")
     if isinstance(proc, list):
         proc = proc[0]
@@ -114,28 +156,16 @@ def switch_to_putsql_processor(local_pg, dbcp_svc, table_name="raw_bike_availabi
         if isinstance(proc, list) and proc:
             proc = proc[0]
 
-    # 如果舊處理器存在且是 RUNNING，先將其停止
-    if proc:
-        proc = nipyapi.canvas.get_processor(proc.id, identifier_type="id")
-        if isinstance(proc, list):
-            proc = proc[0]
-        if proc.component.state == "RUNNING":
-            log("-> 停止舊的寫入處理器...")
-            try:
-                nipyapi.canvas.schedule_processor(proc, scheduled=False)
-                time.sleep(1)
-            except Exception as e:
-                log(f"[WARN] 停止處理器提示: {e}")
+    # 確保停止舊處理器
+    stop_processor_safely(proc)
 
-    # 檢查是否需要重新建立為標準 PutSQL
+    # 檢查是否為 PutSQL，若為舊的 PutDatabaseRecord 則替換
     is_putsql = proc and "PutSQL" in proc.component.type
     if not is_putsql and proc:
-        log("-> 偵測到舊處理器為 PutDatabaseRecord，準備替換為 PutSQL...")
-        # 取得連線資訊以便重建
+        log("-> 偵測到舊處理器為 PutDatabaseRecord，準備切換為 PutSQL...")
         conns = nipyapi.canvas.list_all_connections(local_pg.id)
         incoming_conn = next((c for c in conns if c.destination_id == proc.id), None)
 
-        # 建立 PutSQL
         new_proc = nipyapi.canvas.create_processor(
             parent_pg=local_pg,
             processor=nipyapi.canvas.get_processor_type("PutSQL"),
@@ -144,23 +174,20 @@ def switch_to_putsql_processor(local_pg, dbcp_svc, table_name="raw_bike_availabi
         )
         log(f"-> 新增 PutSQL 成功，UUID: {new_proc.id}")
 
-        # 若有前置連線，重定向至新處理器
         if incoming_conn:
-            log(f"-> 重定向連線 [{incoming_conn.component.name}] 到新的 PutSQL...")
+            log(f"-> 重定向連線至新的 PutSQL 處理器...")
             incoming_conn.component.destination.id = new_proc.id
             nipyapi.canvas.update_connection(incoming_conn)
 
-        # 刪除舊處理器
         try:
             nipyapi.canvas.delete_processor(proc)
-            log("-> 舊處理器已移除")
+            log("-> 舊有的 PutDatabaseRecord 處理器已安全移除。")
         except Exception as e:
             log(f"[WARN] 移除舊處理器提示: {e}")
 
         proc = new_proc
 
     elif not proc:
-        # 直接於流程圖建立 PutSQL
         log("-> 直接建立 PutSQL 處理器...")
         proc = nipyapi.canvas.create_processor(
             parent_pg=local_pg,
@@ -173,9 +200,9 @@ def switch_to_putsql_processor(local_pg, dbcp_svc, table_name="raw_bike_availabi
     if isinstance(proc, list):
         proc = proc[0]
 
-    # 設定 SQL 寫入語法與 DBCP Pool
+    # 配置 SQL 參數：將 FlowFile 內容綁定至 ?::jsonb
     sql_statement = f"INSERT INTO {table_name} (source_endpoint, payload) VALUES ('Bike-Availability-Taipei', ?::jsonb)"
-    
+
     props = {
         "JDBC Connection Pool": dbcp_svc.id,
         "SQL Statement": sql_statement,
@@ -208,7 +235,6 @@ def switch_to_putsql_processor(local_pg, dbcp_svc, table_name="raw_bike_availabi
     if errors:
         log(f"[CRITICAL] 處理器仍有驗證錯誤: {errors}")
     else:
-        # 啟動處理器
         current_state = updated_proc.component.state
         if current_state == "STOPPED":
             log("-> 發送啟動指令 (schedule_processor scheduled=True)...")
@@ -241,6 +267,14 @@ def create_local_2_sql_pg(parent_pg=None, *args, **kwargs):
 
         log(f"[OK] 找到目標 PG: {local_pg.component.name} ({local_pg.id})")
 
+        # 1. 前置安全動作：優先停止既有寫入處理器，解除對 Controller Service 的 409 鎖定
+        old_proc = nipyapi.canvas.get_processor(PUT_DB_PROC_ID, identifier_type="id")
+        if isinstance(old_proc, list) and old_proc:
+            stop_processor_safely(old_proc[0])
+        elif old_proc:
+            stop_processor_safely(old_proc)
+
+        # 2. 確保 DBCP 連線池服務啟動（此時無 running processor 鎖定）
         db_config = kwargs.get("db_config", DEFAULT_DB_CONFIG)
         dbcp_properties = {
             "Database Connection URL": db_config["url"],
@@ -250,7 +284,6 @@ def create_local_2_sql_pg(parent_pg=None, *args, **kwargs):
             "Password": db_config["password"],
         }
 
-        # 1. 確保 DBCP 連線池服務啟動
         dbcp_svc = ensure_local_controller_service(
             local_pg=local_pg,
             service_type="org.apache.nifi.dbcp.DBCPConnectionPool",
@@ -258,7 +291,7 @@ def create_local_2_sql_pg(parent_pg=None, *args, **kwargs):
             properties=dbcp_properties,
         )
 
-        # 2. 將寫入處理器轉為 PutSQL 並啟動
+        # 3. 部署 / 替換為 PutSQL 並啟動
         table_name = kwargs.get("table_name", "raw_bike_availability")
         switch_to_putsql_processor(local_pg, dbcp_svc, table_name=table_name)
 
