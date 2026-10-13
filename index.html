@@ -15,10 +15,9 @@
       --danger: #ef4444;
       --warning: #f59e0b;
       --success: #22c55e;
+      --scheduled: #3b82f6;
     }
-
     * { box-sizing: border-box; }
-
     body {
       background-color: var(--bg);
       color: var(--text);
@@ -27,7 +26,6 @@
       padding: 24px;
       line-height: 1.5;
     }
-
     .header {
       display: flex;
       justify-content: space-between;
@@ -36,7 +34,23 @@
       flex-wrap: wrap;
       gap: 12px;
     }
-
+    .title-group {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .live-indicator {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background-color: var(--success);
+      box-shadow: 0 0 10px var(--success);
+      animation: neonPulse 1.5s infinite alternate;
+    }
+    @keyframes neonPulse {
+      0% { opacity: 0.4; transform: scale(0.9); box-shadow: 0 0 4px var(--success); }
+      100% { opacity: 1; transform: scale(1.2); box-shadow: 0 0 14px var(--success); }
+    }
     .status-badge {
       padding: 6px 14px;
       border-radius: 999px;
@@ -46,17 +60,14 @@
       align-items: center;
       gap: 6px;
     }
-
-    .status-online { background-color: rgba(34, 197, 94, 0.2); color: var(--success); }
-    .status-offline { background-color: rgba(239, 68, 68, 0.2); color: var(--danger); }
-
+    .status-online { background-color: rgba(34, 197, 94, 0.2); color: var(--success); border: 1px solid rgba(34, 197, 94, 0.4); }
+    .status-offline { background-color: rgba(239, 68, 68, 0.2); color: var(--danger); border: 1px solid rgba(239, 68, 68, 0.4); }
     .actions-bar {
       display: flex;
       gap: 10px;
       margin-bottom: 24px;
       flex-wrap: wrap;
     }
-
     .btn {
       background-color: var(--card-bg);
       border: 1px solid var(--border);
@@ -71,54 +82,63 @@
       gap: 6px;
       transition: all 0.2s;
     }
-
     .btn:hover {
       background-color: var(--border);
       border-color: var(--accent);
     }
-
     .btn-ai {
       background-color: #0284c7;
       border-color: #38bdf8;
       color: #fff;
       font-weight: 600;
     }
-
     .btn-ai:hover {
       background-color: #0369a1;
       box-shadow: 0 0 12px rgba(56, 189, 248, 0.35);
     }
-
     /* KPI 卡片 */
     .kpi-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
       gap: 14px;
       margin-bottom: 24px;
     }
-
     .kpi-card {
       background-color: var(--card-bg);
       border: 1px solid var(--border);
       border-radius: 8px;
       padding: 14px 18px;
+      position: relative;
+      overflow: hidden;
     }
-
+    .kpi-card::after {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 2px;
+      background: linear-gradient(90deg, transparent, var(--accent), transparent);
+      animation: scanline 3s linear infinite;
+    }
+    @keyframes scanline {
+      0% { transform: translateX(-100%); }
+      100% { transform: translateX(100%); }
+    }
     .kpi-label {
       font-size: 12px;
       color: var(--text-muted);
       margin-bottom: 4px;
     }
-
     .kpi-value {
       font-size: 22px;
       font-weight: 700;
       color: #f1f5f9;
     }
-
     .kpi-value.danger { color: var(--danger); }
     .kpi-value.warning { color: var(--warning); }
     .kpi-value.accent { color: var(--accent); }
+    .kpi-value.success { color: var(--success); }
 
     /* 快速除錯警報面板 */
     .debug-alert-panel {
@@ -129,16 +149,13 @@
       margin-bottom: 24px;
       display: none;
     }
-
     .debug-alert-panel.active { display: block; }
-
     .debug-header {
       color: var(--danger);
       font-weight: 700;
       margin-bottom: 12px;
       font-size: 14px;
     }
-
     .debug-item {
       background: var(--card-bg);
       border: 1px solid var(--border);
@@ -147,7 +164,6 @@
       margin-bottom: 8px;
       font-size: 13px;
     }
-
     .section-title {
       font-size: 16px;
       font-weight: 600;
@@ -160,24 +176,28 @@
     /* Process Group 卡片 */
     .pg-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+      grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
       gap: 18px;
       margin-bottom: 28px;
     }
-
     .pg-card {
       background-color: var(--card-bg);
       border: 1px solid var(--border);
       border-radius: 10px;
       padding: 18px;
       position: relative;
-      transition: border-color 0.2s, transform 0.2s;
+      transition: border-color 0.2s, transform 0.2s, box-shadow 0.2s;
     }
-
     .pg-card:hover { transform: translateY(-2px); }
-    .pg-card.is-active { border-color: var(--accent); }
+    .pg-card.is-active {
+      border-color: var(--accent);
+      box-shadow: 0 0 14px rgba(56, 189, 248, 0.15);
+    }
+    .pg-card.is-scheduled {
+      border-color: var(--scheduled);
+      box-shadow: 0 0 10px rgba(59, 130, 246, 0.15);
+    }
     .pg-card.has-error { border-color: var(--danger); }
-
     .pg-header {
       display: flex;
       justify-content: space-between;
@@ -185,47 +205,50 @@
       margin-bottom: 10px;
       gap: 10px;
     }
-
     .pg-name {
       font-weight: 700;
       font-size: 14px;
       color: #fff;
       word-break: break-all;
     }
-
     .pg-sub-id {
       font-size: 11px;
       color: var(--text-muted);
       font-family: monospace;
     }
-
     .pg-state-pill {
       font-size: 11px;
-      padding: 3px 8px;
+      padding: 4px 10px;
       border-radius: 999px;
       background: #334155;
       color: var(--text-muted);
       font-weight: 600;
       display: inline-flex;
       align-items: center;
-      gap: 5px;
+      gap: 6px;
       white-space: nowrap;
     }
-
     .pg-state-pill.active {
       background: rgba(34, 197, 94, 0.18);
       color: var(--success);
+      border: 1px solid rgba(34, 197, 94, 0.3);
     }
-
+    .pg-state-pill.scheduled {
+      background: rgba(59, 130, 246, 0.18);
+      color: var(--scheduled);
+      border: 1px solid rgba(59, 130, 246, 0.3);
+    }
     .state-dot {
       width: 7px;
       height: 7px;
       border-radius: 50%;
       background: currentColor;
     }
-
     .pg-state-pill.active .state-dot {
-      animation: pulseDot 1.5s infinite;
+      animation: pulseDot 1.2s infinite;
+    }
+    .pg-state-pill.scheduled .state-dot {
+      animation: pulseDot 2s infinite;
     }
 
     /* 水流軌道動態 */
@@ -237,64 +260,63 @@
       color: var(--text-muted);
       margin-bottom: 4px;
     }
-
     .stream-track {
-      height: 7px;
+      height: 8px;
       background: #090d16;
       border-radius: 4px;
       overflow: hidden;
       border: 1px solid rgba(255, 255, 255, 0.05);
     }
-
     .stream-flow {
       height: 100%;
       width: 100%;
       opacity: 0.15;
       background: repeating-linear-gradient(90deg, #475569 0px, #475569 10px, transparent 10px, transparent 20px);
     }
-
     .stream-flow.flowing {
       opacity: 1;
       background: repeating-linear-gradient(90deg, var(--accent) 0px, var(--accent) 14px, rgba(56, 189, 248, 0.2) 14px, rgba(56, 189, 248, 0.2) 28px);
       background-size: 56px 100%;
-      animation: streamFlowing 0.85s linear infinite;
+      animation: streamFlowing 0.75s linear infinite;
     }
-
+    .stream-flow.scheduled-flow {
+      opacity: 0.65;
+      background: repeating-linear-gradient(90deg, var(--scheduled) 0px, var(--scheduled) 12px, rgba(59, 130, 246, 0.15) 12px, rgba(59, 130, 246, 0.15) 24px);
+      background-size: 48px 100%;
+      animation: streamFlowing 2.2s linear infinite;
+    }
     @keyframes streamFlowing {
       0% { background-position: 0 0; }
       100% { background-position: 56px 0; }
     }
-
     @keyframes pulseDot {
       0%, 100% { opacity: 1; transform: scale(1); }
-      50% { opacity: 0.35; transform: scale(0.8); }
+      50% { opacity: 0.3; transform: scale(0.75); }
     }
 
+    /* 擴充為 6 格 Metrics Grid */
     .pg-metrics-grid {
       display: grid;
-      grid-template-columns: repeat(2, 1fr);
+      grid-template-columns: repeat(3, 1fr);
       gap: 8px;
     }
-
     .metric-cell {
       background: #0f172a;
       padding: 8px 10px;
       border-radius: 6px;
       border: 1px solid rgba(255, 255, 255, 0.03);
     }
-
     .metric-name { font-size: 11px; color: var(--text-muted); margin-bottom: 2px; }
-    .metric-data { font-size: 14px; font-weight: 700; color: #f1f5f9; }
+    .metric-data { font-size: 13px; font-weight: 700; color: #f1f5f9; }
     .metric-data.warn { color: var(--warning); }
     .metric-data.danger { color: var(--danger); }
     .metric-data.highlight { color: var(--accent); }
-
+    .metric-data.success { color: var(--success); }
     .pg-actions {
       display: flex;
       gap: 8px;
       margin-top: 14px;
     }
-
     .pg-details {
       margin-top: 14px;
       padding-top: 12px;
@@ -302,9 +324,7 @@
       display: none;
       font-size: 12px;
     }
-
     .pg-details.open { display: block; }
-
     .processor-row {
       display: flex;
       justify-content: space-between;
@@ -313,7 +333,6 @@
       border-bottom: 1px solid rgba(255, 255, 255, 0.05);
       gap: 8px;
     }
-
     .status-tag {
       font-size: 10px;
       padding: 2px 6px;
@@ -324,7 +343,7 @@
     .tag-valid { background: rgba(34, 197, 94, 0.2); color: var(--success); }
     .tag-invalid { background: rgba(239, 68, 68, 0.2); color: var(--danger); }
 
-    /* 表格共用樣式 */
+    /* 表格樣式 */
     table {
       width: 100%;
       border-collapse: collapse;
@@ -334,19 +353,16 @@
       border: 1px solid var(--border);
       margin-bottom: 20px;
     }
-
     th, td {
       padding: 10px 14px;
       text-align: left;
       font-size: 13px;
       border-bottom: 1px solid var(--border);
     }
-
     th { background-color: #162032; color: var(--text-muted); font-weight: 600; }
     .empty-state { padding: 18px; text-align: center; color: var(--text-muted); font-size: 13px; }
     .badge-warn { color: var(--warning); font-weight: 600; }
     .badge-err { color: var(--danger); font-weight: bold; }
-
     #toast {
       position: fixed;
       bottom: 24px;
@@ -364,11 +380,13 @@
   </style>
 </head>
 <body>
-
   <div class="header">
-    <div>
-      <h2 style="margin: 0;">⚡ NiFi 流程即時監控 & AI 診斷面板</h2>
-      <div style="font-size: 13px; color: var(--text-muted); margin-top: 4px;">以 Process Group 為架構單位進行實時排查與快照輸出</div>
+    <div class="title-group">
+      <div class="live-indicator"></div>
+      <div>
+        <h2 style="margin: 0;">⚡ NiFi 流程即時監控 & AI 診斷面板</h2>
+        <div style="font-size: 13px; color: var(--text-muted); margin-top: 4px;">實時吞吐量動態感知與 Process Group 智能除錯快照</div>
+      </div>
     </div>
     <div>
       <span id="connectionStatus" class="status-badge status-offline">同步中...</span>
@@ -382,7 +400,7 @@
     <button class="btn" onclick="fetchData()">🔄 立即刷新</button>
   </div>
 
-  <!-- 全域 KPI 監控 -->
+  <!-- 全域 KPI 監控 (擴充吞吐量與動態指標) -->
   <div class="kpi-grid">
     <div class="kpi-card">
       <div class="kpi-label">執行緒總數 (Threads)</div>
@@ -397,7 +415,15 @@
       <div id="kpiQueuedBytes" class="kpi-value">0 B</div>
     </div>
     <div class="kpi-card">
-      <div class="kpi-label">無效/驗證失敗 Processor</div>
+      <div class="kpi-label">累積 FlowFiles 產出</div>
+      <div id="kpiTotalFlowFilesOut" class="kpi-value success">0</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">總寫入資料量</div>
+      <div id="kpiTotalBytesWritten" class="kpi-value accent">0 B</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">無效 Processor</div>
       <div id="kpiInvalidProcs" class="kpi-value danger">0</div>
     </div>
     <div class="kpi-card">
@@ -467,12 +493,14 @@
     </tbody>
   </table>
 
-  <div id="toast">📋 已複製 JSON 快照至剪貼簿！可直接貼給 AI 進行分析</div>
+  <div id="toast">📋 已複製 JSON 快照至剪貼簿！</div>
 
   <script>
     const FIREBASE_URL = "https://nifi-d2de1-default-rtdb.firebaseio.com/nifi_monitor.json";
     const POLL_INTERVAL = 5000;
+    const RECENT_ACTIVITY_TTL = 15000; // 歷史脈動緩衝維持時間 (毫秒)
     let globalPayload = null;
+    let pgLastActiveMap = new Map(); // 紀錄每個 PG 的最後活躍時間點
 
     function showToast(message) {
       const toast = document.getElementById("toast");
@@ -512,7 +540,6 @@
       if (!globalPayload) return;
       const procs = (globalPayload.processors_blueprint || []).filter(p => (p.process_group_id || p.parentGroupId) === pgId);
       const bottlenecks = (globalPayload.bottlenecks || []).filter(b => (b.connection_id && b.connection_id.includes(pgId)));
-
       const pgSnapshot = {
         process_group_id: pgId,
         timestamp: globalPayload.timestamp,
@@ -535,8 +562,8 @@
       const updated = document.getElementById("lastUpdated");
       if (isOnline) {
         badge.className = "status-badge status-online";
-        badge.innerText = "● 快照同步正常";
-        updated.innerText = `最後更新：${timestamp ? new Date(timestamp).toLocaleTimeString() : new Date().toLocaleTimeString()}`;
+        badge.innerText = "● 實時連線中";
+        updated.innerText = `最後刷新：${timestamp ? new Date(timestamp).toLocaleTimeString() : new Date().toLocaleTimeString()}`;
       } else {
         badge.className = "status-badge status-offline";
         badge.innerText = "● 離線 / 同步失敗";
@@ -546,10 +573,11 @@
     function renderKPIs(data) {
       const kpi = data.kpi || {};
       const ctrl = data.controller_status || {};
-
       const threads = kpi.activeThreadCount ?? ctrl.activeThreadCount ?? 0;
       const queuedFiles = kpi.flowFilesQueued ?? ctrl.flowFilesQueued ?? 0;
       const queuedBytes = kpi.bytesQueued ?? ctrl.bytesQueued ?? 0;
+      const totalFlowFilesOut = kpi.flowFilesOut ?? ctrl.flowFilesOut ?? 0;
+      const totalBytesWritten = kpi.bytesWritten ?? ctrl.bytesWritten ?? 0;
       const invalidCount = kpi.invalidComponentCount ?? (data.invalid_processors ? data.invalid_processors.length : 0);
       const warnings = kpi.warningCount ?? 0;
       const errors = kpi.errorCount ?? 0;
@@ -557,6 +585,8 @@
       document.getElementById("kpiThreads").innerText = Number(threads).toLocaleString();
       document.getElementById("kpiQueuedFiles").innerText = Number(queuedFiles).toLocaleString();
       document.getElementById("kpiQueuedBytes").innerText = formatBytes(queuedBytes);
+      document.getElementById("kpiTotalFlowFilesOut").innerText = Number(totalFlowFilesOut).toLocaleString();
+      document.getElementById("kpiTotalBytesWritten").innerText = formatBytes(totalBytesWritten);
       document.getElementById("kpiInvalidProcs").innerText = Number(invalidCount).toLocaleString();
       document.getElementById("kpiWarningsErrors").innerText = `${warnings} / ${errors}`;
     }
@@ -565,7 +595,6 @@
       const panel = document.getElementById("debugAlertPanel");
       const list = document.getElementById("debugAlertList");
       list.innerHTML = "";
-
       let hasIssue = false;
 
       (data.invalid_processors || []).forEach(proc => {
@@ -593,19 +622,15 @@
         list.appendChild(item);
       });
 
-      if (hasIssue) {
-        panel.classList.add("active");
-      } else {
-        panel.classList.remove("active");
-      }
+      if (hasIssue) panel.classList.add("active");
+      else panel.classList.remove("active");
     }
 
     function renderProcessGroups(data) {
       const container = document.getElementById("pgContainer");
       const summaries = data.process_groups_summary || [];
       const procs = data.processors_blueprint || [];
-      const conns = data.connections_blueprint || [];
-
+      const now = Date.now();
       const pgMap = new Map();
 
       summaries.forEach(s => {
@@ -617,8 +642,12 @@
           connCount: Number(s.connection_count ?? 0),
           activeThreadCount: Number(s.activeThreadCount ?? 0),
           queuedCount: Number(s.queuedCount ?? s.flowFilesQueued ?? 0),
-          processors: [],
-          invalidCount: 0
+          flowFilesOut: Number(s.flowFilesOut ?? s.flow_files_out ?? 0),
+          bytesWritten: Number(s.bytesWritten ?? s.bytes_written ?? 0),
+          runningCount: Number(s.runningCount ?? 0),
+          stoppedCount: Number(s.stoppedCount ?? 0),
+          invalidCount: 0,
+          processors: []
         });
       });
 
@@ -632,17 +661,29 @@
             connCount: 0,
             activeThreadCount: 0,
             queuedCount: 0,
-            processors: [],
-            invalidCount: 0
+            flowFilesOut: 0,
+            bytesWritten: 0,
+            runningCount: 0,
+            stoppedCount: 0,
+            invalidCount: 0,
+            processors: []
           });
         }
         const pg = pgMap.get(pgId);
         pg.processors.push(p);
+
         if (p.validation_status && p.validation_status !== "VALID") {
           pg.invalidCount++;
         }
         if (p.runtime_status && p.runtime_status.activeThreadCount) {
           pg.activeThreadCount += p.runtime_status.activeThreadCount;
+        }
+        if (p.state === "RUNNING" || p.status === "RUNNING") {
+          pg.runningCount++;
+        }
+        if (p.stats) {
+          pg.flowFilesOut += Number(p.stats.flowFilesOut || 0);
+          pg.bytesWritten += Number(p.stats.bytesWritten || 0);
         }
       });
 
@@ -652,9 +693,36 @@
       }
 
       container.innerHTML = Array.from(pgMap.values()).map(pg => {
-        const isFlowing = pg.activeThreadCount > 0;
+        // 多維活躍度判定：執行緒、輸出數、寫入量
+        const currentActive = pg.activeThreadCount > 0 || pg.flowFilesOut > 0 || pg.bytesWritten > 0;
+        
+        // 快照歷史緩衝更新
+        if (currentActive) {
+          pgLastActiveMap.set(pg.id, now);
+        }
+        const lastActiveTime = pgLastActiveMap.get(pg.id) || 0;
+        const isRecentActive = (now - lastActiveTime) < RECENT_ACTIVITY_TTL;
+
+        // 排程型判定：包含 RUNNING 狀態元件且非停用
+        const isScheduled = !currentActive && !isRecentActive && (pg.runningCount > 0 || pg.processors.some(p => p.state === "RUNNING"));
+        const isFlowing = currentActive || isRecentActive;
         const hasError = pg.invalidCount > 0;
-        const cardClass = `pg-card ${isFlowing ? 'is-active' : ''} ${hasError ? 'has-error' : ''}`;
+
+        let statusClass = "idle";
+        let statusLabel = "靜止 (Idle)";
+        let streamClass = "";
+
+        if (isFlowing) {
+          statusClass = "active";
+          statusLabel = "● 流動處理中 (Flowing)";
+          streamClass = "flowing";
+        } else if (isScheduled) {
+          statusClass = "scheduled";
+          statusLabel = "⏰ 排程待命 (Scheduled)";
+          streamClass = "scheduled-flow";
+        }
+
+        const cardClass = `pg-card ${isFlowing ? 'is-active' : ''} ${isScheduled ? 'is-scheduled' : ''} ${hasError ? 'has-error' : ''}`;
 
         const procListHtml = pg.processors.map(p => {
           const typeName = (p.type || "").split(".").pop();
@@ -676,34 +744,42 @@
                 <div class="pg-name" title="${pg.id}">${pg.name}</div>
                 <div class="pg-sub-id">${pg.id}</div>
               </div>
-              <span class="pg-state-pill ${isFlowing ? 'active' : ''}">
+              <span class="pg-state-pill ${statusClass}">
                 <span class="state-dot"></span>
-                ${isFlowing ? '流動中 (Flowing)' : '靜止 (Idle)'}
+                ${statusLabel}
               </span>
             </div>
-
             <div class="stream-wrapper">
               <div class="stream-meta">
-                <span>傳輸活躍狀態</span>
-                <span>${isFlowing ? 'FlowFile 處理中' : '無執行緒作業'}</span>
+                <span>數據流動軌道</span>
+                <span>${isFlowing ? 'FlowFile 即時處理中' : (isScheduled ? '排程觸發計時中' : '無作業')}</span>
               </div>
               <div class="stream-track">
-                <div class="stream-flow ${isFlowing ? 'flowing' : ''}"></div>
+                <div class="stream-flow ${streamClass}"></div>
               </div>
             </div>
 
+            <!-- 擴充為 6 格關鍵指標 -->
             <div class="pg-metrics-grid">
               <div class="metric-cell">
-                <div class="metric-name">處理器數 (Processors)</div>
+                <div class="metric-name">處理器數</div>
                 <div class="metric-data">${pg.processors.length || pg.procCount}</div>
               </div>
               <div class="metric-cell">
-                <div class="metric-name">連線數 (Connections)</div>
+                <div class="metric-name">連線數</div>
                 <div class="metric-data">${pg.connCount}</div>
               </div>
               <div class="metric-cell">
-                <div class="metric-name">活躍執行緒 (Threads)</div>
+                <div class="metric-name">活躍執行緒</div>
                 <div class="metric-data ${pg.activeThreadCount > 0 ? 'highlight' : ''}">${pg.activeThreadCount}</div>
+              </div>
+              <div class="metric-cell">
+                <div class="metric-name">FlowFiles Out</div>
+                <div class="metric-data ${pg.flowFilesOut > 0 ? 'success' : ''}">${pg.flowFilesOut.toLocaleString()}</div>
+              </div>
+              <div class="metric-cell">
+                <div class="metric-name">寫入資料量</div>
+                <div class="metric-data ${pg.bytesWritten > 0 ? 'highlight' : ''}">${formatBytes(pg.bytesWritten)}</div>
               </div>
               <div class="metric-cell">
                 <div class="metric-name">異常元件數</div>
@@ -715,7 +791,6 @@
               <button class="btn" style="flex: 1;" onclick="togglePGDetails('${pg.id}')">🔍 展開/折疊 元件</button>
               <button class="btn btn-ai" onclick="copySinglePGJSON('${pg.id}')">📋 複製 PG 快照</button>
             </div>
-
             <div class="pg-details" id="details-${pg.id}">
               <strong style="display:block; margin-bottom:8px; color:var(--text-muted);">內部 Processors:</strong>
               ${procListHtml}
@@ -733,19 +808,18 @@
     function renderBottlenecks(data) {
       const tbody = document.getElementById("bottlenecksBody");
       const list = data.bottlenecks || [];
-
       if (!list || list.length === 0) {
         tbody.innerHTML = `<tr><td colspan="5" class="empty-state">目前無壅塞連線 (佇列暢通)</td></tr>`;
         return;
       }
-
       tbody.innerHTML = list.map(b => {
         const queuedCount = Number(b.queued_count ?? b.flowFilesQueued ?? 0);
         const percent = b.percent_use_count ?? b.percentUse ?? "0%";
         return `
           <tr>
+
             <td>${b.connection_name || b.name || b.connection_id || "-"}</td>
-            <td>${b.source_name || b.sourceName || "-"}</td>
+|---|---|---|---|---|
             <td>${b.destination_name || b.destinationName || "-"}</td>
             <td class="badge-warn">${queuedCount.toLocaleString()} 筆</td>
             <td>${percent}%</td>
@@ -757,12 +831,10 @@
     function renderInvalidProcessors(data) {
       const tbody = document.getElementById("invalidProcessorsBody");
       const list = data.invalid_processors || [];
-
       if (!list || list.length === 0) {
         tbody.innerHTML = `<tr><td colspan="5" class="empty-state">無任何驗證錯誤處理器</td></tr>`;
         return;
       }
-
       tbody.innerHTML = list.map(p => {
         const errors = (p.validation_errors || p.validationErrors || []).join("<br>");
         return `
@@ -780,12 +852,10 @@
     function renderBulletins(data) {
       const tbody = document.getElementById("bulletinsBody");
       const list = data.bulletins || [];
-
       if (!list || list.length === 0) {
         tbody.innerHTML = `<tr><td colspan="3" class="empty-state">目前無告警通知</td></tr>`;
         return;
       }
-
       tbody.innerHTML = list.slice(0, 15).map(b => {
         const item = b.bulletin || b;
         const isErr = (item.level || "").toUpperCase() === "ERROR";
@@ -805,7 +875,6 @@
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         if (!data) return;
-
         globalPayload = data;
         updateConnectionStatus(true, data.timestamp);
         renderKPIs(data);
