@@ -42,7 +42,7 @@
 
     .status-badge {
       font-size: 0.9rem;
-      padding: 6px 12px;
+      padding: 6px 14px;
       border-radius: 9999px;
       background: #334155;
     }
@@ -186,28 +186,42 @@
   </section>
 
   <script>
-    // 請填入您的 API 端點或 GitHub Gist Raw 連結
-    const GIST_URL = "data.json"; 
+    // 指向 Firebase Realtime Database REST 端點
+    const FIREBASE_URL = "https://nifi-d2de1-default-rtdb.firebaseio.com/nifi_monitor.json"; 
 
     function setConnectionStatus(isOnline, message) {
       const el = document.getElementById("connectionStatus");
       if (!el) return;
-      el.className = `status-badge ${isOnline ? "status-online" : "status-offline"}`;
+      el.className = status-badge ${isOnline ? "status-online" : "status-offline"};
       el.textContent = message;
     }
 
     function renderDashboard(data) {
       if (!data) return;
 
-      // 1. 渲染 KPI 區塊
-      document.getElementById("kpiConnections").textContent = data.total_connections ?? "-";
-      document.getElementById("kpiQueuedCount").textContent = data.total_queued_count ?? "-";
-      document.getElementById("kpiBottlenecks").textContent = (data.bottlenecks || []).length;
-      document.getElementById("kpiInvalidProcessors").textContent = (data.invalid_processors || []).length;
+      // 1. KPI 欄位映射與容錯計算
+      const kpi = data.kpi || {};
+      
+      // 計算所有 Process Group 的連線總數
+      let totalConnections = data.total_connections;
+      if (totalConnections === undefined && Array.isArray(data.process_groups_summary)) {
+        totalConnections = data.process_groups_summary.reduce((acc, pg) => acc + (pg.connection_count || 0), 0);
+      }
+      document.getElementById("kpiConnections").textContent = totalConnections ?? "-";
+
+      // 佇列數量（優先取 kpi.flowFilesQueued）
+      const queuedCount = kpi.flowFilesQueued ?? data.total_queued_count ?? 0;
+      document.getElementById("kpiQueuedCount").textContent = Number(queuedCount).toLocaleString();
+
+      // 瓶頸與異常元件計數
+      const bottlenecks = data.bottlenecks || [];
+      const invalidProcessors = data.invalid_processors || [];
+      document.getElementById("kpiBottlenecks").textContent = bottlenecks.length;
+      document.getElementById("kpiInvalidProcessors").textContent = invalidProcessors.length;
 
       // 2. 渲染 Bottlenecks 表格
       const bContainer = document.getElementById("bottleneckContainer");
-      if (data.bottlenecks && data.bottlenecks.length > 0) {
+      if (bottlenecks.length > 0) {
         let html = `<table>
           <thead>
             <tr>
@@ -221,7 +235,7 @@
           </thead>
           <tbody>`;
 
-        data.bottlenecks.forEach(b => {
+        bottlenecks.forEach(b => {
           html += `<tr>
             <td><strong>${b.connection_name || b.connection_id}</strong></td>
             <td>${b.source_name || "-"}</td>
@@ -232,15 +246,15 @@
           </tr>`;
         });
 
-        html += `</tbody></table>`;
+        html += </tbody></table>;
         bContainer.innerHTML = html;
       } else {
-        bContainer.innerHTML = `<p class="empty-msg">佇列正常，無背壓或堵塞連線</p>`;
+        bContainer.innerHTML = <p class="empty-msg">佇列正常，無背壓或堵塞連線</p>;
       }
 
       // 3. 渲染 Invalid Processors 表格
       const pContainer = document.getElementById("invalidContainer");
-      if (data.invalid_processors && data.invalid_processors.length > 0) {
+      if (invalidProcessors.length > 0) {
         let html = `<table>
           <thead>
             <tr>
@@ -252,7 +266,7 @@
           </thead>
           <tbody>`;
 
-        data.invalid_processors.forEach(p => {
+        invalidProcessors.forEach(p => {
           const errors = Array.isArray(p.validation_errors) 
             ? p.validation_errors.join("<br>") 
             : (p.validation_errors || "-");
@@ -261,35 +275,28 @@
             <td><strong>${p.name || p.id}</strong></td>
             <td>${p.type || "-"}</td>
             <td><span class="badge badge-danger">${p.state || "INVALID"}</span></td>
-            <td>${errors}</td>
+            <td style="color: #fca5a5; font-size: 0.85rem;">${errors}</td>
           </tr>`;
         });
 
-        html += `</tbody></table>`;
+        html += </tbody></table>;
         pContainer.innerHTML = html;
       } else {
-        pContainer.innerHTML = `<p class="empty-msg">所有 Processor 皆正常運行，無驗證錯誤</p>`;
+        pContainer.innerHTML = <p class="empty-msg">所有 Processor 皆正常運行，無驗證錯誤</p>;
       }
     }
 
     async function refreshMonitor() {
       try {
-        const res = await fetch(GIST_URL);
+        const res = await fetch(FIREBASE_URL);
         if (!res.ok) {
-          throw new Error(`HTTP 錯誤: ${res.status}`);
+          throw new Error("HTTP 錯誤: " + res.status);
         }
 
-        const text = await res.text();
-
-        // 避免伺服器回傳 HTML 網頁（例如 404/錯誤頁）導致 JSON.parse 報 Unexpected token '<'
-        if (text.trim().startsWith("<")) {
-          throw new Error("伺服器回傳了 HTML 而非 JSON 格式");
-        }
-
-        const data = JSON.parse(text);
+        const data = await res.json();
 
         if (!data) {
-          setConnectionStatus(false, "資料庫目前無資料 (請確認 Python 程式是否正在運行)");
+          setConnectionStatus(false, "資料庫目前無資料 (請啟動 Python 推送)");
           return;
         }
 
@@ -298,14 +305,14 @@
           ? new Date(data.timestamp).toLocaleTimeString() 
           : new Date().toLocaleTimeString();
 
-        setConnectionStatus(true, `最後同步: ${updateTime}`);
+        setConnectionStatus(true, "最後同步: " + updateTime);
       } catch (err) {
         setConnectionStatus(false, "無法連線至資料庫");
         console.error("Fetch error:", err);
       }
     }
 
-    // 每 3 秒自動更新一次
+    // 每 3 秒輪詢更新
     setInterval(refreshMonitor, 3000);
     refreshMonitor();
   </script>
