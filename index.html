@@ -3,522 +3,249 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>NiFi 即時流向監控儀表板</title>
+  <title>NiFi 監控儀表板</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
   <style>
-    :root {
-      --bg: #0f172a;
-      --card-bg: #1e293b;
-      --card-border: #334155;
-      --text-main: #f8fafc;
-      --text-muted: #94a3b8;
-      --accent: #38bdf8;
-      --success: #10b981;
-      --warning: #f59e0b;
-      --danger: #ef4444;
-    }
-
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    }
-
     body {
-      background-color: var(--bg);
-      color: var(--text-main);
-      padding: 24px;
-      line-height: 1.5;
+      background-color: #f4f6f9;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     }
-
-    .container {
-      max-width: 1400px;
-      margin: 0 auto;
-    }
-
-    header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      flex-wrap: wrap;
-      gap: 16px;
-      padding-bottom: 20px;
-      border-bottom: 1px solid var(--card-border);
-      margin-bottom: 24px;
-    }
-
-    .header-title h1 {
-      font-size: 24px;
-      font-weight: 700;
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
-
-    .status-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      font-size: 13px;
-      padding: 4px 10px;
-      border-radius: 9999px;
-      background: rgba(16, 185, 129, 0.15);
-      color: var(--success);
-      border: 1px solid rgba(16, 185, 129, 0.3);
-    }
-
-    .status-badge.error {
-      background: rgba(239, 68, 68, 0.15);
-      color: var(--danger);
-      border-color: rgba(239, 68, 68, 0.3);
-    }
-
-    .status-dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background-color: currentColor;
-    }
-
-    .header-meta {
-      display: flex;
-      gap: 20px;
-      align-items: center;
-      font-size: 13px;
-      color: var(--text-muted);
-    }
-
-    .control-panel {
-      background-color: var(--card-bg);
-      border: 1px solid var(--card-border);
-      border-radius: 8px;
-      padding: 12px 16px;
-      margin-bottom: 24px;
-      display: flex;
-      gap: 16px;
-      align-items: center;
-      font-size: 13px;
-    }
-
-    select {
-      background: #0f172a;
-      border: 1px solid var(--card-border);
-      color: var(--text-main);
-      padding: 6px 10px;
-      border-radius: 6px;
-      outline: none;
-    }
-
-    button {
-      background: #3b82f6;
-      color: #fff;
-      border: none;
-      padding: 6px 14px;
-      border-radius: 6px;
-      cursor: pointer;
-      font-weight: 500;
-    }
-
-    button:hover {
-      background: #2563eb;
-    }
-
-    .kpi-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-      gap: 16px;
-      margin-bottom: 24px;
-    }
-
     .kpi-card {
-      background-color: var(--card-bg);
-      border: 1px solid var(--card-border);
-      border-radius: 10px;
-      padding: 16px;
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
+      border-radius: 8px;
+      border: 1px solid #e2e8f0;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+      background-color: #fff;
     }
-
-    .kpi-title {
-      font-size: 13px;
-      color: var(--text-muted);
-      font-weight: 500;
-    }
-
     .kpi-value {
-      font-size: 26px;
+      font-size: 1.8rem;
       font-weight: 700;
-      color: var(--text-main);
-      font-variant-numeric: tabular-nums;
     }
-
-    .kpi-card.warn .kpi-value { color: var(--warning); }
-    .kpi-card.danger .kpi-value { color: var(--danger); }
-    .kpi-card.highlight .kpi-value { color: var(--accent); }
-
-    .section-title {
-      font-size: 16px;
-      font-weight: 600;
-      margin-bottom: 12px;
-    }
-
-    .data-table-card {
-      background-color: var(--card-bg);
-      border: 1px solid var(--card-border);
-      border-radius: 10px;
-      overflow: hidden;
-      margin-bottom: 24px;
-    }
-
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      text-align: left;
-      font-size: 13px;
-    }
-
-    th {
-      background: rgba(15, 23, 42, 0.6);
-      color: var(--text-muted);
-      font-weight: 600;
-      padding: 12px 16px;
-      border-bottom: 1px solid var(--card-border);
-    }
-
-    td {
-      padding: 12px 16px;
-      border-bottom: 1px solid var(--card-border);
-      color: var(--text-main);
-    }
-
-    tr:last-child td {
-      border-bottom: none;
-    }
-
-    .empty-msg {
-      text-align: center;
-      padding: 32px;
-      color: var(--text-muted);
-    }
-
-    .progress-bar {
-      background: #334155;
-      height: 6px;
-      border-radius: 3px;
-      overflow: hidden;
-      width: 100px;
-      display: inline-block;
-      vertical-align: middle;
-      margin-right: 8px;
-    }
-
-    .progress-fill {
-      height: 100%;
-      background: var(--warning);
-    }
-
-    .progress-fill.danger {
-      background: var(--danger);
-    }
-
-    .badge {
-      display: inline-block;
-      padding: 2px 8px;
-      border-radius: 4px;
-      font-size: 12px;
-      font-weight: 600;
-    }
-
-    .badge-danger { background: rgba(239, 68, 68, 0.2); color: var(--danger); }
-    .badge-warning { background: rgba(245, 158, 11, 0.2); color: var(--warning); }
-    .badge-info { background: rgba(56, 189, 248, 0.2); color: var(--accent); }
-
-    .bulletin-item {
-      padding: 10px 16px;
-      border-bottom: 1px solid var(--card-border);
-      display: flex;
-      gap: 12px;
-      align-items: flex-start;
-      font-size: 13px;
-    }
-
-    .bulletin-item:last-child {
-      border-bottom: none;
-    }
-
-    .bulletin-msg {
-      flex: 1;
-      font-family: monospace;
-      color: #cbd5e1;
+    .kpi-label {
+      color: #64748b;
+      font-size: 0.875rem;
+      font-weight: 500;
     }
   </style>
 </head>
-<body>
-
-<div class="container">
-  <header>
-    <div class="header-title">
-      <h1>NiFi 即時流向監控儀表板</h1>
-      <span id="sync-status" class="status-badge">
-        <span class="status-dot"></span>
-        <span id="sync-status-text">連線中...</span>
-      </span>
+<body class="p-4">
+  <div class="container-fluid">
+    <!-- 頂端控制列與狀態 -->
+    <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+      <div>
+        <h2 class="h4 mb-1">Apache NiFi 叢集監控儀表板</h2>
+        <div class="text-muted small">
+          API 基礎路徑: <span id="nifi-base-url">http://127.0.0.1:8080/nifi-api</span> |
+          最後更新時間: <span id="last-updated" class="fw-semibold">--</span>
+        </div>
+      </div>
+      <div class="d-flex align-items-center gap-2">
+        <label for="cfg-interval" class="form-label mb-0 text-nowrap small text-muted">自動重整:</label>
+        <select id="cfg-interval" class="form-select form-select-sm" style="width: auto;">
+          <option value="3000">3 秒</option>
+          <option value="5000" selected>5 秒</option>
+          <option value="10000">10 秒</option>
+          <option value="30000">30 秒</option>
+        </select>
+        <button id="btn-manual-sync" class="btn btn-primary btn-sm">立即同步</button>
+      </div>
     </div>
-    <div class="header-meta">
-      <div>最後更新: <span id="last-updated" style="color: var(--text-main); font-weight: 500;">-</span></div>
-      <div>通道模式: <span style="color: var(--success); font-weight: 600;">Gist Raw CDN (免金鑰・無額度上限)</span></div>
-    </div>
-  </header>
 
-  <div class="control-panel">
-    <label>更新頻率:</label>
-    <select id="cfg-interval">
-      <option value="2000">2 秒</option>
-      <option value="5000" selected>5 秒</option>
-      <option value="10000">10 秒</option>
-    </select>
-    <button id="btn-manual-sync" style="margin-left: auto;">立即刷新</button>
+    <!-- KPI 資訊卡 -->
+    <div class="row g-3 mb-4">
+      <div class="col-6 col-md-4 col-lg-2">
+        <div class="p-3 kpi-card">
+          <div class="kpi-label">Active Threads</div>
+          <div class="kpi-value text-primary" id="kpi-active-threads">0</div>
+        </div>
+      </div>
+      <div class="col-6 col-md-4 col-lg-2">
+        <div class="p-3 kpi-card">
+          <div class="kpi-label">Queued Flows</div>
+          <div class="kpi-value text-warning" id="kpi-flowfiles-queued">0</div>
+        </div>
+      </div>
+      <div class="col-6 col-md-4 col-lg-2">
+        <div class="p-3 kpi-card">
+          <div class="kpi-label">Queued Data</div>
+          <div class="kpi-value text-secondary" id="kpi-bytes-queued">0 / 0 bytes</div>
+        </div>
+      </div>
+      <div class="col-6 col-md-4 col-lg-2">
+        <div class="p-3 kpi-card">
+          <div class="kpi-label">Running Processors</div>
+          <div class="kpi-value text-success" id="kpi-running-count">0</div>
+        </div>
+      </div>
+      <div class="col-6 col-md-4 col-lg-2">
+        <div class="p-3 kpi-card">
+          <div class="kpi-label">Stopped Processors</div>
+          <div class="kpi-value text-muted" id="kpi-stopped-count">0</div>
+        </div>
+      </div>
+      <div class="col-6 col-md-4 col-lg-2">
+        <div class="p-3 kpi-card">
+          <div class="kpi-label">Invalid Components</div>
+          <div class="kpi-value text-danger" id="kpi-invalid-count">0</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="row g-3">
+      <!-- 處理群組表格 -->
+      <div class="col-lg-8">
+        <div class="card h-100 shadow-sm border-0">
+          <div class="card-header bg-white py-3">
+            <h5 class="card-title mb-0 h6">Process Groups Summary</h5>
+          </div>
+          <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+              <thead class="table-light">
+                <tr>
+                  <th>Process Group ID</th>
+                  <th>Processor Count</th>
+                  <th>Connection Count</th>
+                </tr>
+              </thead>
+              <tbody id="pg-summary-tbody">
+                <tr>
+                  <td colspan="3" class="text-center text-muted py-3">讀取資料中...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- 公告與告警 -->
+      <div class="col-lg-4">
+        <div class="card h-100 shadow-sm border-0">
+          <div class="card-header bg-white py-3">
+            <h5 class="card-title mb-0 h6">System Bulletins & 告警</h5>
+          </div>
+          <div class="card-body">
+            <div id="bulletins-container">
+              <div class="alert alert-info mb-0">目前無警告或錯誤訊息</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 
-  <div class="kpi-grid">
-    <div class="kpi-card highlight">
-      <div class="kpi-title">活躍線程數 (Active Threads)</div>
-      <div id="kpi-threads" class="kpi-value">0</div>
-    </div>
-    <div class="kpi-card">
-      <div class="kpi-title">排隊資料筆數 (FlowFiles Queued)</div>
-      <div id="kpi-queued" class="kpi-value">0</div>
-    </div>
-    <div class="kpi-card">
-      <div class="kpi-title">排隊總容量 (Bytes Queued)</div>
-      <div id="kpi-bytes-queued" class="kpi-value">0 B</div>
-    </div>
-    <div class="kpi-card">
-      <div class="kpi-title">讀取量 (Bytes Read)</div>
-      <div id="kpi-read" class="kpi-value">0 B</div>
-    </div>
-    <div class="kpi-card">
-      <div class="kpi-title">寫入量 (Bytes Written)</div>
-      <div id="kpi-written" class="kpi-value">0 B</div>
-    </div>
-    <div class="kpi-card danger">
-      <div class="kpi-title">錯誤數量 (Errors)</div>
-      <div id="kpi-errors" class="kpi-value">0</div>
-    </div>
-    <div class="kpi-card warn">
-      <div class="kpi-title">警告數量 (Warnings)</div>
-      <div id="kpi-warnings" class="kpi-value">0</div>
-    </div>
-    <div class="kpi-card danger">
-      <div class="kpi-title">未就緒元件 (Invalid Components)</div>
-      <div id="kpi-invalid" class="kpi-value">0</div>
-    </div>
-  </div>
+  <script>
+    let timerId = null;
 
-  <div class="section-title">隊列積壓與背壓警示 (Bottlenecks)</div>
-  <div class="data-table-card">
-    <table>
-      <thead>
-        <tr>
-          <th>連線名稱 / ID</th>
-          <th>來源節點</th>
-          <th>目的節點</th>
-          <th>排隊筆數</th>
-          <th>排隊容量</th>
-          <th>背壓使用率 (筆數 / 容量)</th>
-        </tr>
-      </thead>
-      <tbody id="tbody-bottlenecks">
-        <tr><td colspan="6" class="empty-msg">目前沒有任何隊列積壓或背壓警戒</td></tr>
-      </tbody>
-    </table>
-  </div>
+    // 1. 抓取資料
+    async function fetchLatestData() {
+      // Gist raw 網址：空格請保持 %20 編碼以避免 404
+      const baseUrl = "https://gist.githubusercontent.com/ltmcliao/954552f/raw/nifi%20monitor.json";
+      const fetchUrl = `${baseUrl}?t=${Date.now()}`;
 
-  <div class="section-title">異常/校驗失敗處理器 (Validation Issues)</div>
-  <div class="data-table-card">
-    <table>
-      <thead>
-        <tr>
-          <th>處理器名稱</th>
-          <th>型別</th>
-          <th>狀態</th>
-          <th>錯誤詳情</th>
-        </tr>
-      </thead>
-      <tbody id="tbody-invalid">
-        <tr><td colspan="4" class="empty-msg">所有 Processor 皆正常校驗通過</td></tr>
-      </tbody>
-    </table>
-  </div>
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
 
-  <div class="section-title">即時告警公告看板 (Recent Bulletins)</div>
-  <div class="data-table-card" id="bulletins-container">
-    <div class="empty-msg">無任何警示或錯誤訊息</div>
-  </div>
-</div>
+      try {
+        const response = await fetch(fetchUrl, {
+          signal: controller.signal,
+          cache: "no-store"
+        });
 
-<script>
-  const GIST_ID = "954552f04fc9dc1a6eb5b2d6d59cf403";
-  const GIST_FILENAME = "nifi_monitor.json";
+        clearTimeout(timeoutId);
 
-  const RAW_URL_CANDIDATES = [
-    "https://gist.githubusercontent.com/lutomica/" + GIST_ID + "/raw/" + GIST_FILENAME,
-    "https://gist.githubusercontent.com/ltmcliao/" + GIST_ID + "/raw/" + GIST_FILENAME
-  ];
+        if (!response.ok) {
+          throw new Error(`HTTP 錯誤: ${response.status} (${response.statusText})`);
+        }
 
-  let verifiedRawUrl = null;
-  let timerId = null;
+        const data = await response.json();
+        renderUI(data);
+      } catch (error) {
+        clearTimeout(timeoutId);
+        if (error.name === "AbortError") {
+          console.error("更新失敗: HTTP 連線逾時", error);
+        } else {
+          console.error("更新失敗:", error.message);
+        }
+      }
+    }
 
-  function formatBytes(bytes) {
-    if (!bytes || bytes === 0) return "0 B";
-    const k = 1024;
-    const sizes = ["B", "KB", "MB", "GB", "TB"];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
-  }
+    // 2. 渲染 UI
+    function renderUI(data) {
+      if (!data) return;
 
-  async function fetchLatestData() {
-    const statusBadge = document.getElementById("sync-status");
-    const statusText = document.getElementById("sync-status-text");
+      const setVal = (id, val) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = (val !== undefined && val !== null) ? val : "--";
+      };
 
-    try {
-      let response = null;
+      // 基礎設定與時間戳
+      if (data.nifi_base_url) setVal("nifi-base-url", data.nifi_base_url);
+      if (data.timestamp) {
+        setVal("last-updated", new Date(data.timestamp).toLocaleString("zh-TW"));
+      }
 
-      if (verifiedRawUrl) {
-        response = await fetch(verifiedRawUrl + "?_t=" + Date.now(), { cache: "no-store" });
-      } else {
-        for (let i = 0; i < RAW_URL_CANDIDATES.length; i++) {
-          const testUrl = RAW_URL_CANDIDATES[i];
-          try {
-            const testRes = await fetch(testUrl + "?_t=" + Date.now(), { cache: "no-store" });
-            if (testRes.ok) {
-              verifiedRawUrl = testUrl;
-              response = testRes;
-              break;
-            }
-          } catch (e) {
-            // 嘗試下一個候選網址
-          }
+      // 指標計算 (Controller Status 與 KPI 聚合)
+      const ctrl = data.controller_status || {};
+      const kpi = data.kpi || {};
+
+      setVal("kpi-active-threads", ctrl.activeThreadCount ?? kpi.activeThreadCount);
+      setVal("kpi-flowfiles-queued", ctrl.flowFilesQueued ?? kpi.flowFilesQueued);
+      setVal("kpi-bytes-queued", ctrl.queued || `${ctrl.bytesQueued ?? kpi.bytesQueued} bytes`);
+      setVal("kpi-running-count", ctrl.runningCount);
+      setVal("kpi-stopped-count", ctrl.stoppedCount);
+      setVal("kpi-invalid-count", ctrl.invalidCount ?? kpi.invalidComponentCount);
+
+      // Bulletins
+      const bulletinsContainer = document.getElementById("bulletins-container");
+      if (bulletinsContainer) {
+        const list = data.bulletins || [];
+        if (list.length === 0) {
+          bulletinsContainer.innerHTML = '<div class="alert alert-info mb-0">目前無警告或錯誤訊息</div>';
+        } else {
+          bulletinsContainer.innerHTML = list.map(item => `
+            <div class="alert alert-warning mb-2">
+              ${typeof item === "object" ? (item.message || JSON.stringify(item)) : item}
+            </div>
+          `).join("");
         }
       }
 
-      if (!response || !response.ok) {
-        const statusCode = response ? response.status : "連線逾時";
-        throw new Error("HTTP " + statusCode);
+      // Process Groups 表格
+      const pgTableBody = document.getElementById("pg-summary-tbody");
+      if (pgTableBody && Array.isArray(data.process_groups_summary)) {
+        if (data.process_groups_summary.length === 0) {
+          pgTableBody.innerHTML = '<tr><td colspan="3" class="text-center text-muted py-3">無 Process Group 資訊</td></tr>';
+        } else {
+          pgTableBody.innerHTML = data.process_groups_summary.map(pg => `
+            <tr>
+              <td><code>${pg.process_group_id}</code></td>
+              <td>${pg.processor_count}</td>
+              <td>${pg.connection_count}</td>
+            </tr>
+          `).join("");
+        }
       }
-
-      const payload = await response.json();
-      renderUI(payload);
-
-      statusBadge.className = "status-badge";
-      statusText.textContent = "即時同步中 (Raw CDN)";
-    } catch (err) {
-      console.error("更新失敗:", err);
-      statusBadge.className = "status-badge error";
-      statusText.textContent = "同步失敗: " + err.message;
-    }
-  }
-
-  function renderUI(data) {
-    const timestamp = data.timestamp ? new Date(data.timestamp).toLocaleTimeString() : new Date().toLocaleTimeString();
-    document.getElementById("last-updated").textContent = timestamp;
-
-    const kpi = data.kpi || {};
-    document.getElementById("kpi-threads").textContent = (kpi.activeThreadCount || 0).toLocaleString();
-    document.getElementById("kpi-queued").textContent = (kpi.flowFilesQueued || 0).toLocaleString();
-    document.getElementById("kpi-bytes-queued").textContent = formatBytes(kpi.bytesQueued);
-    document.getElementById("kpi-read").textContent = formatBytes(kpi.bytesRead);
-    document.getElementById("kpi-written").textContent = formatBytes(kpi.bytesWritten);
-    document.getElementById("kpi-errors").textContent = (kpi.errorCount || 0).toLocaleString();
-    document.getElementById("kpi-warnings").textContent = (kpi.warningCount || 0).toLocaleString();
-    document.getElementById("kpi-invalid").textContent = (kpi.invalidComponentCount || 0).toLocaleString();
-
-    const tbodyBottlenecks = document.getElementById("tbody-bottlenecks");
-    const bottlenecks = data.bottlenecks || [];
-    if (bottlenecks.length === 0) {
-      tbodyBottlenecks.innerHTML = '<tr><td colspan="6" class="empty-msg">目前沒有任何隊列積壓或背壓警戒</td></tr>';
-    } else {
-      let bHtml = "";
-      for (let i = 0; i < bottlenecks.length; i++) {
-        const b = bottlenecks[i];
-        const countPercent = b.percent_use_count || 0;
-        const bytesPercent = b.percent_use_bytes || 0;
-        const isHigh = countPercent >= 80 || bytesPercent >= 80;
-        const fillClass = isHigh ? "danger" : "";
-        bHtml += '<tr>' +
-          '<td><strong>' + (b.connection_name || "未命名") + '</strong><br><small style="color: var(--text-muted);">' + (b.connection_id || "") + '</small></td>' +
-          '<td>' + (b.source_name || b.source_id || "-") + '</td>' +
-          '<td>' + (b.destination_name || b.destination_id || "-") + '</td>' +
-          '<td><strong>' + (b.queued_count || 0).toLocaleString() + '</strong></td>' +
-          '<td>' + (b.queued_size || "0 B") + '</td>' +
-          '<td>' +
-            '<div><span class="progress-bar"><span class="progress-fill ' + fillClass + '" style="width: ' + Math.min(countPercent, 100) + '%;"></span></span>' + countPercent + '% (筆數)</div>' +
-            '<div style="margin-top: 4px;"><span class="progress-bar"><span class="progress-fill ' + fillClass + '" style="width: ' + Math.min(bytesPercent, 100) + '%;"></span></span>' + bytesPercent + '% (容量)</div>' +
-          '</td>' +
-        '</tr>';
-      }
-      tbodyBottlenecks.innerHTML = bHtml;
     }
 
-    const tbodyInvalid = document.getElementById("tbody-invalid");
-    const invalidProcs = data.invalid_processors || [];
-    if (invalidProcs.length === 0) {
-      tbodyInvalid.innerHTML = '<tr><td colspan="4" class="empty-msg">所有 Processor 皆正常校驗通過</td></tr>';
-    } else {
-      let invHtml = "";
-      for (let i = 0; i < invalidProcs.length; i++) {
-        const p = invalidProcs[i];
-        const typeShort = (p.type || "").split(".").pop();
-        const errText = (p.validation_errors || []).join("\\n");
-        invHtml += '<tr>' +
-          '<td><strong>' + (p.name || "未命名") + '</strong><br><small style="color: var(--text-muted);">' + (p.processor_id || "") + '</small></td>' +
-          '<td>' + typeShort + '</td>' +
-          '<td><span class="badge badge-danger">' + (p.validation_status || "INVALID") + '</span></td>' +
-          '<td><pre style="margin: 0; color: #fca5a5; white-space: pre-wrap; font-size: 12px;">' + errText + '</pre></td>' +
-        '</tr>';
-      }
-      tbodyInvalid.innerHTML = invHtml;
+    // 3. 定時輪詢控制器
+    function resetPolling() {
+      if (timerId) clearInterval(timerId);
+
+      const intervalSelect = document.getElementById("cfg-interval");
+      const interval = parseInt(intervalSelect ? intervalSelect.value : 5000, 10);
+
+      fetchLatestData();
+      timerId = setInterval(fetchLatestData, interval);
     }
 
-    const bulletinsContainer = document.getElementById("bulletins-container");
-    const bulletins = data.bulletins || [];
-    if (bulletins.length === 0) {
-      bulletinsContainer.innerHTML = '<div class="empty-msg">無任何警示或錯誤訊息</div>';
-    } else {
-      let bullHtml = "";
-      const recent = bulletins.slice(-10).reverse();
-      for (let i = 0; i < recent.length; i++) {
-        const item = recent[i].bulletin || {};
-        const level = (item.level || "INFO").toUpperCase();
-        let badgeClass = "badge-info";
-        if (level === "ERROR") badgeClass = "badge-danger";
-        else if (level === "WARNING") badgeClass = "badge-warning";
+    // 4. 事件綁定
+    const btnSync = document.getElementById("btn-manual-sync");
+    if (btnSync) btnSync.addEventListener("click", fetchLatestData);
 
-        bullHtml += '<div class="bulletin-item">' +
-          '<span class="badge ' + badgeClass + '">' + level + '</span>' +
-          '<div class="bulletin-msg">' +
-            '<strong>[' + (item.sourceName || "系統") + ']</strong> ' + (item.message || "") +
-            '<div style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">' + (item.timestamp || "") + '</div>' +
-          '</div>' +
-        '</div>';
-      }
-      bulletinsContainer.innerHTML = bullHtml;
-    }
-  }
+    const selectInterval = document.getElementById("cfg-interval");
+    if (selectInterval) selectInterval.addEventListener("change", resetPolling);
 
-  function resetPolling() {
-    if (timerId) clearInterval(timerId);
-    const intervalSelect = document.getElementById("cfg-interval");
-    const interval = parseInt(intervalSelect ? intervalSelect.value : 5000, 10);
-    fetchLatestData();
-    timerId = setInterval(fetchLatestData, interval);
-  }
-
-  document.getElementById("btn-manual-sync").addEventListener("click", fetchLatestData);
-  document.getElementById("cfg-interval").addEventListener("change", resetPolling);
-
-  resetPolling();
-</script>
+    // 首次啟動
+    resetPolling();
+  </script>
 </body>
 </html>
