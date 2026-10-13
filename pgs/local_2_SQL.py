@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-pgs/local_2_SQL.py - Local_2_SQL 完整流程圖模組 (徹底解決 Controller Service 400 錯誤)
+pgs/local_2_SQL.py - Local_2_SQL 完整流程圖模組 (符合原生 nipyapi 高階介面與冪等性規範)
 """
 import os
 import sys
@@ -135,8 +135,15 @@ def safe_purge_and_delete_connection(conn):
         log(f"連線刪除提示: {parse_api_exception(e)}", "WARN")
 
 
-def configure_processor_clean(proc, desired_properties, auto_terminated_rels=None):
-    """屬性精確對齊與舊屬性清理"""
+def configure_processor_clean(proc, desired_properties, auto_terminated_rels=None, scheduling_period=None):
+    """
+    屬性與配置精確對齊：
+    修改 component.config 物件後，透過 nipyapi.canvas.update_processor(proc, proc.component.config) 正確更新。
+    """
+    proc = nipyapi.canvas.get_processor(proc.id, identifier_type="id")
+    if isinstance(proc, list):
+        proc = proc[0]
+
     descriptors = proc.component.config.descriptors or {}
     current_props = proc.component.config.properties or {}
     clean_props = {k: None for k in current_props.keys()}
@@ -155,18 +162,22 @@ def configure_processor_clean(proc, desired_properties, auto_terminated_rels=Non
             log(f"[{proc.component.name}] 警告: 屬性 '{target_name}' 不存在於官方規格！", "WARN")
 
     proc.component.config.properties = clean_props
+
     if auto_terminated_rels:
         valid_rels = [r.name for r in proc.component.relationships]
         proc.component.config.auto_terminated_relationships = [
             r for r in auto_terminated_rels if r in valid_rels
         ]
+
+    if scheduling_period:
+        proc.component.config.scheduling_period = scheduling_period
+
     return nipyapi.canvas.update_processor(proc, proc.component.config)
 
 
 def ensure_local_controller_service(local_pg, service_type, service_name, properties=None):
     """
-    建立或確認 Controller Service 狀態。
-    若需修改屬性，確保無痛處理 DISABLE -> UPDATE -> ENABLE 流程，防範 400 錯誤。
+    建立或複用 Controller Service。符合冪等性原則。
     """
     log(f"檢查 Controller Service: '{service_name}'", "STEP")
     services = nipyapi.canvas.list_all_controllers(local_pg.id)
@@ -187,18 +198,12 @@ def ensure_local_controller_service(local_pg, service_type, service_name, proper
     if isinstance(svc, list):
         svc = svc[0]
 
-    # 檢查屬性是否完全一致，若不同才進行更新
     if properties:
         current_props = svc.component.properties or {}
-        needs_update = False
-        for k, v in properties.items():
-            if current_props.get(k) != v:
-                needs_update = True
-                break
+        needs_update = any(current_props.get(k) != v for k, v in properties.items())
 
         if needs_update:
             log(f"Controller Service 屬性變更，執行安全停用與更新...", "STEP")
-            # 1. 若目前為 ENABLED，必須先停用 (Disable)
             if svc.component.state != "DISABLED":
                 try:
                     nipyapi.canvas.schedule_controller(svc, scheduled=False)
@@ -211,10 +216,8 @@ def ensure_local_controller_service(local_pg, service_type, service_name, proper
                     if isinstance(svc, list):
                         svc = svc[0]
                     if svc.component.state == "DISABLED":
-                        log(f"Controller Service 已成功轉為 DISABLED", "OK")
                         break
 
-            # 2. 更新 Controller Service 配置
             try:
                 svc.component.properties = properties
                 nipyapi.canvas.update_controller(svc, svc.component)
@@ -222,7 +225,6 @@ def ensure_local_controller_service(local_pg, service_type, service_name, proper
             except Exception as e:
                 log(f"更新配置提示: {parse_api_exception(e)}", "WARN")
 
-    # 3. 若服務為 DISABLED，發送啟用命令 (Enable)
     svc = nipyapi.canvas.get_controller(svc.id, identifier_type="id")
     if isinstance(svc, list):
         svc = svc[0]
@@ -281,13 +283,7 @@ def setup_local_2_sql_pipeline(local_pg, dbcp_svc, input_dir=DEFAULT_RAW_DIR, ta
         "Path Filter": ".*",
         "Minimum File Age": "1 min"
     }
-    list_proc = configure_processor_clean(list_proc, list_props)
-    nipyapi.canvas.update_processor(list_proc, {
-        "config": {
-            "schedulingPeriod": "1 min",
-            "concurrentlySchedulableTaskCount": 1
-        }
-    })
+    list_proc = configure_processor_clean(list_proc, list_props, scheduling_period="1 min")
     log(f"ListFile 配置完成 (UUID: {list_proc.id})", "OK")
 
     # -------------------------------------------------------------
@@ -409,7 +405,7 @@ def setup_local_2_sql_pipeline(local_pg, dbcp_svc, input_dir=DEFAULT_RAW_DIR, ta
     )
     log(f"PutSQL 配置完成 (UUID: {putsql_proc.id})", "OK")
 
-    # 建立 5 條管道連線
+    # 建置 Pipeline 流向連線
     log("建置完整 Pipeline 流向連線...", "STEP")
 
     nipyapi.canvas.create_connection(
@@ -503,7 +499,7 @@ def create_local_2_sql_pg(parent_pg=None, *args, **kwargs):
 
         log(f"鎖定 Process Group: {local_pg.component.name} (UUID: {local_pg.id})", "OK")
 
-        # 1. 停止所有現有 Processors，避免占用 Controller Service 導致無法修改
+        # 1. 停止所有現有 Processors，釋放 Controller Service 鎖定
         procs = nipyapi.canvas.list_all_processors(local_pg.id)
         log("首先停止 PG 內所有 Processor，釋放 Controller Service 鎖定...", "STEP")
         for p in procs:
