@@ -90,6 +90,33 @@
       background-color: #0369a1;
     }
 
+    /* 全域 KPI 卡片網格 */
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 14px;
+      margin-bottom: 24px;
+    }
+
+    .kpi-card {
+      background-color: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px 18px;
+    }
+
+    .kpi-label {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-bottom: 4px;
+    }
+
+    .kpi-value {
+      font-size: 20px;
+      font-weight: 700;
+      color: #f1f5f9;
+    }
+
     .section-title {
       font-size: 16px;
       font-weight: 600;
@@ -135,9 +162,10 @@
 
     .pg-name {
       font-weight: 600;
-      font-size: 15px;
+      font-size: 14px;
       color: #ffffff;
       word-break: break-all;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
     }
 
     .pg-state-pill {
@@ -310,6 +338,26 @@
     <button class="btn" onclick="fetchData()">🔄 手動整理</button>
   </div>
 
+  <!-- 全域狀態 KPI 彙整 -->
+  <div class="kpi-grid">
+    <div class="kpi-card">
+      <div class="kpi-label">執行中處理器 (Running)</div>
+      <div id="kpiRunning" class="kpi-value">0</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">停止中處理器 (Stopped)</div>
+      <div id="kpiStopped" class="kpi-value">0</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">全域佇列積壓 (Queued)</div>
+      <div id="kpiQueued" class="kpi-value">0</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">活躍執行緒 (Active Threads)</div>
+      <div id="kpiThreads" class="kpi-value">0</div>
+    </div>
+  </div>
+
   <!-- 依 Process Group 獨立監控 -->
   <div class="section-title">📦 流程群組動態 (Process Groups)</div>
   <div id="pgContainer" class="pg-grid">
@@ -389,9 +437,45 @@
         });
     }
 
-    // 解析 Process Group 快照（向下相容巢狀 aggregateSnapshot 與直接傳陣列）
+    // 解析 Controller Status 與 KPI 資訊
+    function renderOverviewKPI(data) {
+      const ctrl = data.controller_status || {};
+      const kpi = data.kpi || {};
+
+      const runningCount = ctrl.runningCount ?? kpi.runningCount ?? 0;
+      const stoppedCount = ctrl.stoppedCount ?? kpi.stoppedCount ?? 0;
+      const queuedCount = ctrl.flowFilesQueued ?? kpi.flowFilesQueued ?? ctrl.queued ?? 0;
+      const threadCount = ctrl.activeThreadCount ?? kpi.activeThreadCount ?? 0;
+
+      const elRunning = document.getElementById("kpiRunning");
+      const elStopped = document.getElementById("kpiStopped");
+      const elQueued = document.getElementById("kpiQueued");
+      const elThreads = document.getElementById("kpiThreads");
+
+      if (elRunning) elRunning.textContent = runningCount.toLocaleString();
+      if (elStopped) elStopped.textContent = stoppedCount.toLocaleString();
+      if (elQueued) elQueued.textContent = typeof queuedCount === "number" ? queuedCount.toLocaleString() : queuedCount;
+      if (elThreads) elThreads.textContent = threadCount.toLocaleString();
+    }
+
+    // 解析 Process Group 快照（向下相容 process_groups_summary、process_groups 與 aggregateSnapshot）
     function parseProcessGroups(data) {
       if (!data) return [];
+
+      // 相容 Firebase 最新格式: process_groups_summary
+      if (Array.isArray(data.process_groups_summary)) {
+        return data.process_groups_summary.map(item => ({
+          id: item.process_group_id || item.id || "-",
+          name: item.name || (item.process_group_id === "root" ? "Root Process Group" : `PG: ${item.process_group_id}`),
+          processorCount: Number(item.processor_count ?? 0),
+          connectionCount: Number(item.connection_count ?? 0),
+          activeThreadCount: Number(item.activeThreadCount ?? 0),
+          queuedCount: Number(item.queuedCount ?? item.flowFilesQueued ?? 0),
+          flowFilesIn: Number(item.flowFilesIn ?? 0),
+          flowFilesOut: Number(item.flowFilesOut ?? 0)
+        }));
+      }
+
       if (Array.isArray(data.process_groups)) return data.process_groups;
       if (Array.isArray(data.processGroups)) return data.processGroups;
       if (Array.isArray(data.pgs)) return data.pgs;
@@ -407,6 +491,8 @@
             return {
               id: snap.id,
               name: snap.name || "未命名流程群組",
+              processorCount: Number(snap.processorCount || 0),
+              connectionCount: Number(snap.connectionCount || 0),
               activeThreadCount: Number(snap.activeThreadCount || 0),
               queuedCount: Number(snap.flowFilesQueued || snap.queuedCount || 0),
               bytesQueued: snap.bytesQueued || "0 B",
@@ -416,10 +502,11 @@
           });
         }
 
-        // 若無子群組則顯示 Root 本身
         return [{
           id: rootSnap.id || "root",
           name: rootSnap.name || "Root Process Group",
+          processorCount: Number(rootSnap.processorCount || 0),
+          connectionCount: Number(rootSnap.connectionCount || 0),
           activeThreadCount: Number(rootSnap.activeThreadCount || 0),
           queuedCount: Number(rootSnap.flowFilesQueued || rootSnap.queuedCount || 0),
           bytesQueued: rootSnap.bytesQueued || "0 B",
@@ -441,24 +528,24 @@
       }
 
       container.innerHTML = pgs.map(pg => {
-        const isFlowing = (pg.activeThreadCount > 0) || (pg.flowFilesIn > 0) || (pg.flowFilesOut > 0);
+        const isFlowing = (pg.activeThreadCount > 0) || (pg.flowFilesIn > 0) || (pg.flowFilesOut > 0) || (pg.processorCount > 0);
         const hasBacklog = (pg.queuedCount > 0);
 
         return `
           <div class="pg-card ${isFlowing ? 'is-active' : ''}">
             <div class="pg-header">
-              <span class="pg-name">${pg.name}</span>
+              <span class="pg-name" title="${pg.id}">${pg.name}</span>
               <span class="pg-state-pill ${isFlowing ? 'active' : ''}">
                 <span class="state-dot"></span>
-                ${isFlowing ? '流動中 (Active)' : '閒置 (Idle)'}
+                ${isFlowing ? '運行中 (Active)' : '閒置 (Idle)'}
               </span>
             </div>
 
             <!-- FlowFile 動態流動軌道 -->
             <div class="stream-wrapper">
               <div class="stream-meta">
-                <span>FlowFile 串流狀態</span>
-                <span>${isFlowing ? '資料正在流動' : '靜止'}</span>
+                <span>連線狀態</span>
+                <span>${pg.connectionCount > 0 ? `${pg.connectionCount} 條連線` : '無連線'}</span>
               </div>
               <div class="stream-track">
                 <div class="stream-flow ${isFlowing ? 'flowing' : ''}"></div>
@@ -466,6 +553,20 @@
             </div>
 
             <div class="pg-metrics-grid">
+              <div class="metric-cell">
+                <div class="metric-name">處理器數 (Processors)</div>
+                <div class="metric-data ${pg.processorCount > 0 ? 'highlight' : ''}">
+                  ${pg.processorCount.toLocaleString()}
+                </div>
+              </div>
+
+              <div class="metric-cell">
+                <div class="metric-name">連線數 (Connections)</div>
+                <div class="metric-data">
+                  ${pg.connectionCount.toLocaleString()}
+                </div>
+              </div>
+
               <div class="metric-cell">
                 <div class="metric-name">佇列積壓 (Queued)</div>
                 <div class="metric-data ${hasBacklog ? 'warn' : ''}">
@@ -478,16 +579,6 @@
                 <div class="metric-data ${pg.activeThreadCount > 0 ? 'highlight' : ''}">
                   ${pg.activeThreadCount}
                 </div>
-              </div>
-
-              <div class="metric-cell">
-                <div class="metric-name">5分鐘流入 (In)</div>
-                <div class="metric-data">${pg.flowFilesIn.toLocaleString()}</div>
-              </div>
-
-              <div class="metric-cell">
-                <div class="metric-name">5分鐘流出 (Out)</div>
-                <div class="metric-data">${pg.flowFilesOut.toLocaleString()}</div>
               </div>
             </div>
           </div>
@@ -568,6 +659,7 @@
         setConnectionStatus(true, "連線正常");
         document.getElementById("lastUpdated").textContent = `最後同步：${new Date().toLocaleTimeString()}`;
 
+        renderOverviewKPI(data);
         renderProcessGroups(data);
         renderBottlenecks(data);
         renderInvalidProcessors(data);
