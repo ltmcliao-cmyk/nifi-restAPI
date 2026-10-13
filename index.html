@@ -140,6 +140,7 @@
     .kpi-value.accent { color: var(--accent); }
     .kpi-value.success { color: var(--success); }
 
+
     /* 快速除錯警報面板 */
     .debug-alert-panel {
       background: rgba(239, 68, 68, 0.08);
@@ -172,6 +173,7 @@
       align-items: center;
       gap: 8px;
     }
+
 
     /* Process Group 卡片 */
     .pg-grid {
@@ -251,6 +253,7 @@
       animation: pulseDot 2s infinite;
     }
 
+
     /* 水流軌道動態 */
     .stream-wrapper { margin: 12px 0 14px; }
     .stream-meta {
@@ -293,6 +296,7 @@
       0%, 100% { opacity: 1; transform: scale(1); }
       50% { opacity: 0.3; transform: scale(0.75); }
     }
+
 
     /* 擴充為 6 格 Metrics Grid */
     .pg-metrics-grid {
@@ -342,6 +346,7 @@
     }
     .tag-valid { background: rgba(34, 197, 94, 0.2); color: var(--success); }
     .tag-invalid { background: rgba(239, 68, 68, 0.2); color: var(--danger); }
+
 
     /* 表格樣式 */
     table {
@@ -394,11 +399,13 @@
     </div>
   </div>
 
+
   <div class="actions-bar">
     <button class="btn btn-ai" onclick="copyAIDiagnosticsJSON()">🤖 複製 AI 診斷精簡快照</button>
     <button class="btn" onclick="copyRawJSON()">📋 複製完整原始 JSON</button>
     <button class="btn" onclick="fetchData()">🔄 立即刷新</button>
   </div>
+
 
   <!-- 全域 KPI 監控 (擴充吞吐量與動態指標) -->
   <div class="kpi-grid">
@@ -432,17 +439,20 @@
     </div>
   </div>
 
+
   <!-- 快速排錯專區 -->
   <div id="debugAlertPanel" class="debug-alert-panel">
     <div class="debug-header">⚠️ 快速排錯警報：發現元件異常或連線積壓</div>
     <div id="debugAlertList"></div>
   </div>
 
+
   <!-- Process Groups 模組化卡片視圖 -->
   <div class="section-title">📦 流程群組動態 (Process Groups)</div>
   <div id="pgContainer" class="pg-grid">
     <div class="empty-state" style="grid-column: 1 / -1; background: var(--card-bg); border-radius: 8px;">載入流程群組資料中...</div>
   </div>
+
 
   <!-- 壅塞連線監控 (Bottlenecks) -->
   <div class="section-title">🚨 壅塞 / 佇列積壓連線 (Bottlenecks)</div>
@@ -461,6 +471,7 @@
     </tbody>
   </table>
 
+
   <!-- 無效處理器清單 -->
   <div class="section-title">⚠️ 無效處理器 (Invalid Processors)</div>
   <table>
@@ -478,6 +489,7 @@
     </tbody>
   </table>
 
+
   <!-- 系統告警日誌 (Bulletins) -->
   <div class="section-title">📜 即時 Bulletin 告警通知</div>
   <table>
@@ -493,7 +505,9 @@
     </tbody>
   </table>
 
+
   <div id="toast">📋 已複製 JSON 快照至剪貼簿！</div>
+
 
   <script>
     const FIREBASE_URL = "https://nifi-d2de1-default-rtdb.firebaseio.com/nifi_monitor.json";
@@ -502,12 +516,14 @@
     let globalPayload = null;
     let pgLastActiveMap = new Map(); // 紀錄每個 PG 的最後活躍時間點
 
+
     function showToast(message) {
       const toast = document.getElementById("toast");
       if (message) toast.textContent = message;
       toast.style.display = "block";
       setTimeout(() => { toast.style.display = "none"; }, 3000);
     }
+
 
     function copyToClipboard(text, successMessage) {
       navigator.clipboard.writeText(text).then(() => {
@@ -518,10 +534,12 @@
       });
     }
 
+
     function copyRawJSON() {
       if (!globalPayload) return alert("目前尚無監控資料可供複製！");
       copyToClipboard(JSON.stringify(globalPayload, null, 2), "📋 已複製完整原始 JSON！");
     }
+
 
     function copyAIDiagnosticsJSON() {
       if (!globalPayload) return alert("目前尚無監控資料可供複製！");
@@ -536,6 +554,7 @@
       copyToClipboard(JSON.stringify(aiSnapshot, null, 2), "🤖 已複製精簡 AI 診斷快照！");
     }
 
+
     function copySinglePGJSON(pgId) {
       if (!globalPayload) return;
       const procs = (globalPayload.processors_blueprint || []).filter(p => (p.process_group_id || p.parentGroupId) === pgId);
@@ -549,6 +568,7 @@
       copyToClipboard(JSON.stringify(pgSnapshot, null, 2), `📋 已複製 Process Group [${pgId.substring(0, 8)}] 快照！`);
     }
 
+
     function formatBytes(bytes) {
       if (!bytes || bytes === 0) return "0 B";
       const k = 1024;
@@ -556,6 +576,7 @@
       const i = Math.floor(Math.log(bytes) / Math.log(k));
       return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
     }
+
 
     function updateConnectionStatus(isOnline, timestamp) {
       const badge = document.getElementById("connectionStatus");
@@ -570,6 +591,7 @@
       }
     }
 
+
     function renderKPIs(data) {
       const kpi = data.kpi || {};
       const ctrl = data.controller_status || {};
@@ -582,6 +604,7 @@
       const warnings = kpi.warningCount ?? 0;
       const errors = kpi.errorCount ?? 0;
 
+
       document.getElementById("kpiThreads").innerText = Number(threads).toLocaleString();
       document.getElementById("kpiQueuedFiles").innerText = Number(queuedFiles).toLocaleString();
       document.getElementById("kpiQueuedBytes").innerText = formatBytes(queuedBytes);
@@ -591,11 +614,13 @@
       document.getElementById("kpiWarningsErrors").innerText = `${warnings} / ${errors}`;
     }
 
+
     function renderDebugAlerts(data) {
       const panel = document.getElementById("debugAlertPanel");
       const list = document.getElementById("debugAlertList");
       list.innerHTML = "";
       let hasIssue = false;
+
 
       (data.invalid_processors || []).forEach(proc => {
         hasIssue = true;
@@ -610,6 +635,7 @@
         list.appendChild(item);
       });
 
+
       (data.bottlenecks || []).forEach(b => {
         hasIssue = true;
         const item = document.createElement("div");
@@ -622,9 +648,11 @@
         list.appendChild(item);
       });
 
+
       if (hasIssue) panel.classList.add("active");
       else panel.classList.remove("active");
     }
+
 
     function renderProcessGroups(data) {
       const container = document.getElementById("pgContainer");
@@ -632,6 +660,7 @@
       const procs = data.processors_blueprint || [];
       const now = Date.now();
       const pgMap = new Map();
+
 
       summaries.forEach(s => {
         const id = s.process_group_id || s.id;
@@ -650,6 +679,7 @@
           processors: []
         });
       });
+
 
       procs.forEach(p => {
         const pgId = p.process_group_id || p.parentGroupId || "root";
@@ -672,6 +702,7 @@
         const pg = pgMap.get(pgId);
         pg.processors.push(p);
 
+
         if (p.validation_status && p.validation_status !== "VALID") {
           pg.invalidCount++;
         }
@@ -687,15 +718,17 @@
         }
       });
 
+
       if (pgMap.size === 0) {
         container.innerHTML = `<div class="empty-state" style="grid-column: 1 / -1; background: var(--card-bg); border-radius: 8px;">未偵測到任何 Process Group 資訊</div>`;
         return;
       }
 
+
       container.innerHTML = Array.from(pgMap.values()).map(pg => {
         // 多維活躍度判定：執行緒、輸出數、寫入量
         const currentActive = pg.activeThreadCount > 0 || pg.flowFilesOut > 0 || pg.bytesWritten > 0;
-        
+       
         // 快照歷史緩衝更新
         if (currentActive) {
           pgLastActiveMap.set(pg.id, now);
@@ -703,14 +736,17 @@
         const lastActiveTime = pgLastActiveMap.get(pg.id) || 0;
         const isRecentActive = (now - lastActiveTime) < RECENT_ACTIVITY_TTL;
 
+
         // 排程型判定：包含 RUNNING 狀態元件且非停用
         const isScheduled = !currentActive && !isRecentActive && (pg.runningCount > 0 || pg.processors.some(p => p.state === "RUNNING"));
         const isFlowing = currentActive || isRecentActive;
         const hasError = pg.invalidCount > 0;
 
+
         let statusClass = "idle";
         let statusLabel = "靜止 (Idle)";
         let streamClass = "";
+
 
         if (isFlowing) {
           statusClass = "active";
@@ -722,7 +758,9 @@
           streamClass = "scheduled-flow";
         }
 
+
         const cardClass = `pg-card ${isFlowing ? 'is-active' : ''} ${isScheduled ? 'is-scheduled' : ''} ${hasError ? 'has-error' : ''}`;
+
 
         const procListHtml = pg.processors.map(p => {
           const typeName = (p.type || "").split(".").pop();
@@ -736,6 +774,7 @@
             </div>
           `;
         }).join("") || `<div style="color:var(--text-muted); padding:4px 0;">無處理器詳細資訊</div>`;
+
 
         return `
           <div class="${cardClass}">
@@ -758,6 +797,7 @@
                 <div class="stream-flow ${streamClass}"></div>
               </div>
             </div>
+
 
             <!-- 擴充為 6 格關鍵指標 -->
             <div class="pg-metrics-grid">
@@ -787,6 +827,7 @@
               </div>
             </div>
 
+
             <div class="pg-actions">
               <button class="btn" style="flex: 1;" onclick="togglePGDetails('${pg.id}')">🔍 展開/折疊 元件</button>
               <button class="btn btn-ai" onclick="copySinglePGJSON('${pg.id}')">📋 複製 PG 快照</button>
@@ -800,10 +841,12 @@
       }).join("");
     }
 
+
     function togglePGDetails(pgId) {
       const el = document.getElementById(`details-${pgId}`);
       if (el) el.classList.toggle("open");
     }
+
 
     function renderBottlenecks(data) {
       const tbody = document.getElementById("bottlenecksBody");
@@ -818,6 +861,7 @@
         return `
           <tr>
 
+
             <td>${b.connection_name || b.name || b.connection_id || "-"}</td>
 |---|---|---|---|---|
             <td>${b.destination_name || b.destinationName || "-"}</td>
@@ -827,6 +871,7 @@
         `;
       }).join("");
     }
+
 
     function renderInvalidProcessors(data) {
       const tbody = document.getElementById("invalidProcessorsBody");
@@ -849,6 +894,7 @@
       }).join("");
     }
 
+
     function renderBulletins(data) {
       const tbody = document.getElementById("bulletinsBody");
       const list = data.bulletins || [];
@@ -868,6 +914,7 @@
         `;
       }).join("");
     }
+
 
     async function fetchData() {
       try {
@@ -889,8 +936,14 @@
       }
     }
 
+
     fetchData();
     setInterval(fetchData, POLL_INTERVAL);
   </script>
 </body>
 </html>
+
+
+
+
+
