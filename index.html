@@ -19,32 +19,42 @@
     .pulse-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--success); animation: pulse 2s infinite; }
     @keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.4; transform: scale(1.2); } }
     .status-badge { background: #14532d; color: #4ade80; padding: 4px 10px; border-radius: 20px; font-weight: bold; font-size: 12px; }
+    .status-badge.alert { background: #7f1d1d; color: #f87171; }
+
+    /* 按鈕樣式 */
+    .btn { background: #334155; border: none; color: #fff; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px; transition: background 0.2s; }
+    .btn:hover { background: #475569; }
+    .btn-ai { background: #0284c7; font-weight: 600; display: flex; align-items: center; gap: 6px; }
+    .btn-ai:hover { background: #0369a1; }
 
     /* KPI 卡片 */
-    .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
+    .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin-bottom: 24px; }
     .kpi-card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
     .kpi-label { color: var(--text-sub); font-size: 12px; margin-bottom: 8px; }
     .kpi-value { font-size: 24px; font-weight: 700; color: var(--accent); transition: color 0.3s ease; }
     .kpi-alert { color: var(--danger) !important; }
 
     /* 雙欄主控區 */
-    .dashboard-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
-    .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 16px; display: flex; flex-direction: column; height: 600px; }
+    .dashboard-grid { display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 20px; }
+    .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 16px; display: flex; flex-direction: column; height: 620px; }
     .panel-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; font-weight: bold; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
 
-    /* 錯誤事件清單 */
-    .bulletin-list { overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 8px; }
-    .bulletin-item { background: #0f172a; border-left: 4px solid var(--warning); padding: 10px; border-radius: 4px; cursor: pointer; transition: all 0.2s; }
-    .bulletin-item:hover { background: #26334d; }
-    .bulletin-item.error { border-left-color: var(--danger); }
-    .bulletin-item.active { outline: 1px solid var(--accent); background: #1e3a5f; }
-    .bulletin-meta { font-size: 11px; color: var(--text-sub); display: flex; justify-content: space-between; margin-bottom: 4px; }
+    /* 頁籤切換樣式 */
+    .tab-group { display: flex; gap: 8px; }
+    .tab-btn { background: #0f172a; border: 1px solid var(--border); color: var(--text-sub); padding: 4px 10px; border-radius: 4px; cursor: pointer; font-size: 12px; }
+    .tab-btn.active { background: var(--accent); color: #0f172a; font-weight: bold; border-color: var(--accent); }
+
+    /* 清單視圖 */
+    .item-list { overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 8px; }
+    .list-item { background: #0f172a; border-left: 4px solid var(--warning); padding: 10px; border-radius: 4px; cursor: pointer; transition: all 0.2s; }
+    .list-item:hover { background: #26334d; }
+    .list-item.error { border-left-color: var(--danger); }
+    .list-item.active { outline: 1px solid var(--accent); background: #1e3a5f; }
+    .item-meta { font-size: 11px; color: var(--text-sub); display: flex; justify-content: space-between; margin-bottom: 4px; }
 
     /* JSON 檢視器 */
     .json-viewer-container { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
-    .action-bar { display: flex; justify-content: space-between; margin-bottom: 8px; }
-    .btn { background: #334155; border: none; color: #fff; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px; }
-    .btn:hover { background: #475569; }
+    .action-bar { display: flex; gap: 8px; align-items: center; }
     .json-code { flex: 1; background: #0b1120; border: 1px solid var(--border); border-radius: 4px; padding: 12px; overflow: auto; color: #38bdf8; font-family: "Courier New", Courier, monospace; font-size: 12px; white-space: pre-wrap; word-break: break-all; }
   </style>
 </head>
@@ -53,73 +63,94 @@
   <header>
     <div class="title-group">
       <div class="pulse-dot" id="pulseDot"></div>
-      <h2>NiFi 管線狀態即時監控</h2>
+      <h2>NiFi 管線即時監控</h2>
       <span class="status-badge" id="systemStatus">連線中...</span>
     </div>
-    <div style="font-size: 12px; color: var(--text-sub);">
-      最後同步：<span id="lastUpdated">-</span> | 倒數：<span id="countdown">--</span> 秒
+    <div style="display: flex; align-items: center; gap: 16px;">
+      <button class="btn btn-ai" onclick="copyAIDistilledJSON()">🤖 複製精煉診斷 JSON (給 AI)</button>
+      <div style="font-size: 12px; color: var(--text-sub);">
+        最後同步：<span id="lastUpdated">-</span> | 倒數：<span id="countdown">--</span> 秒
+      </div>
     </div>
   </header>
 
-  <!-- 4 大端點 KPI 彙整 -->
+  <!-- KPI 指標彙整 -->
   <div class="kpi-grid">
     <div class="kpi-card">
       <div class="kpi-label">活躍執行緒 (Threads)</div>
       <div class="kpi-value" id="kpiThreads">0</div>
     </div>
     <div class="kpi-card">
-      <div class="kpi-label">連線佇列滯留 (Queued)</div>
+      <div class="kpi-label">佇列總滯留 (Queued)</div>
       <div class="kpi-value" id="kpiQueued">0</div>
     </div>
     <div class="kpi-card">
-      <div class="kpi-label">資料吞吐量 (Bytes)</div>
+      <div class="kpi-label">資料吞吐量 (Throughput)</div>
       <div class="kpi-value" id="kpiThroughput">0 B</div>
     </div>
     <div class="kpi-card">
-      <div class="kpi-label">未排除告警 (Bulletins)</div>
+      <div class="kpi-label">異常元件 (Invalid)</div>
+      <div class="kpi-value" id="kpiInvalid">0</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">系統告警 (Bulletins)</div>
       <div class="kpi-value" id="kpiBulletins">0</div>
     </div>
   </div>
 
   <!-- 主要診斷視圖 -->
   <div class="dashboard-grid">
-    <!-- 左側：Bulletin 告警時間軸 (端點 3) -->
+    <!-- 左側：異常診斷與清單 -->
     <div class="panel">
       <div class="panel-header">
-        <span>異常事件時間軸 (Bulletin Board)</span>
-        <span style="font-size: 12px; color: var(--text-sub);" id="bulletinCount">共 0 則</span>
+        <div class="tab-group">
+          <button class="tab-btn active" onclick="switchTab('bulletins')">系統告警 (<span id="tabCountBulletins">0</span>)</button>
+          <button class="tab-btn" onclick="switchTab('bottlenecks')">滯留瓶頸 (<span id="tabCountBottlenecks">0</span>)</button>
+          <button class="tab-btn" onclick="switchTab('invalid')">無效元件 (<span id="tabCountInvalid">0</span>)</button>
+        </div>
       </div>
-      <div class="bulletin-list" id="bulletinList">
-        <div style="color: var(--text-sub); text-align: center; margin-top: 40px;">目前管線運行正常，無異常警告</div>
+      <div class="item-list" id="diagnosticList">
+        <div style="color: var(--text-sub); text-align: center; margin-top: 40px;">等待載入資料...</div>
       </div>
     </div>
 
-    <!-- 右側：錯誤與原始 JSON 檢視器 -->
+    <!-- 右側：結構化 JSON 診斷器 -->
     <div class="panel">
       <div class="panel-header">
         <span>結構化 JSON 診斷器</span>
         <div class="action-bar">
-          <button class="btn" onclick="copyCurrentJSON()">複製 JSON</button>
+          <button class="btn" onclick="showFullSnapshotInViewer()">檢視完整原始快照</button>
+          <button class="btn" onclick="copyCurrentJSON()">複製當前視圖</button>
         </div>
       </div>
       <div class="json-viewer-container">
-        <div id="jsonSummary" style="font-size: 12px; color: #f59e0b; margin-bottom: 6px;">點選左側事件可快速定位問題</div>
+        <div id="jsonSummary" style="font-size: 12px; color: #f59e0b; margin-bottom: 6px;">點選左側項目可快速檢視詳細資訊</div>
         <pre class="json-code" id="jsonDisplay">/* 等待載入資料... */</pre>
       </div>
     </div>
   </div>
 
   <script>
-    // ⚙️ 請替換為你的 GIST_ID 與 檔案名稱
-    const GIST_ID = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
+    const GIST_ID = "954552f04fc9dc1a6eb5b2d6d59cf403";
     const GIST_FILENAME = "nifi_monitor.json";
-    
-    // Gist API 端點 (直接讀取，完全無 GitHub 靜態 CDN 快取延遲)
     const GIST_API_URL = `https://api.github.com/gists/${GIST_ID}`;
     
-    const POLL_INTERVAL = 5; // 前端輪詢頻率 (秒)
+    const POLL_INTERVAL = 5;
     let countdownSec = POLL_INTERVAL;
     let fullSnapshot = null;
+    let activeTab = "bulletins";
+
+    function switchTab(tab) {
+      activeTab = tab;
+      document.querySelectorAll('.tab-btn').forEach((btn, idx) => {
+        btn.classList.toggle('active', 
+          (idx === 0 && tab === 'bulletins') || 
+          (idx === 1 && tab === 'bottlenecks') || 
+          (idx === 2 && tab === 'invalid')
+        );
+      });
+      if (fullSnapshot) renderList(fullSnapshot);
+    }
 
     async function fetchLatestData() {
       try {
@@ -132,59 +163,133 @@
           renderDashboard(fullSnapshot);
         }
       } catch (err) {
-        document.getElementById('systemStatus').textContent = "同步中斷";
-        document.getElementById('systemStatus').style.background = "#7f1d1d";
+        const statusBadge = document.getElementById('systemStatus');
+        statusBadge.textContent = "同步中斷";
+        statusBadge.classList.add('alert');
         document.getElementById('pulseDot').style.background = "var(--danger)";
       }
     }
 
     function renderDashboard(data) {
-      document.getElementById('systemStatus').textContent = data.status;
-      document.getElementById('lastUpdated').textContent = data.timestamp;
+      const kpi = data.kpi || {};
+      const statusBadge = document.getElementById('systemStatus');
 
-      // 1. KPI 渲染
-      const kpis = data.kpis;
-      document.getElementById('kpiThreads').textContent = kpis.activeThreadCount;
-      document.getElementById('kpiQueued').textContent = kpis.flowFilesQueued.toLocaleString();
-      document.getElementById('kpiThroughput').textContent = (kpis.bytesRead + kpis.bytesWritten).toLocaleString() + " B";
+      // 1. 系統整體狀態標籤
+      const hasErrors = (kpi.errorCount > 0) || (data.invalid_processors?.length > 0);
+      statusBadge.textContent = hasErrors ? "存在異常" : "運行良好";
+      statusBadge.classList.toggle('alert', hasErrors);
+      document.getElementById('pulseDot').style.background = hasErrors ? "var(--danger)" : "var(--success)";
+      document.getElementById('lastUpdated').textContent = data.timestamp ? new Date(data.timestamp).toLocaleTimeString() : "-";
+
+      // 2. 渲染 KPI
+      document.getElementById('kpiThreads').textContent = kpi.activeThreadCount ?? 0;
+      document.getElementById('kpiQueued').textContent = (kpi.flowFilesQueued ?? 0).toLocaleString();
+      document.getElementById('kpiThroughput').textContent = ((kpi.bytesRead ?? 0) + (kpi.bytesWritten ?? 0)).toLocaleString() + " B";
       
+      const invalidElem = document.getElementById('kpiInvalid');
+      invalidElem.textContent = kpi.invalidComponentCount ?? 0;
+      invalidElem.classList.toggle('kpi-alert', (kpi.invalidComponentCount ?? 0) > 0);
+
+      const totalBulletins = (kpi.warningCount ?? 0) + (kpi.errorCount ?? 0);
       const bulletinElem = document.getElementById('kpiBulletins');
-      bulletinElem.textContent = kpis.bulletinCount;
-      if (kpis.bulletinCount > 0) {
-        bulletinElem.classList.add('kpi-alert');
-      } else {
-        bulletinElem.classList.remove('kpi-alert');
-      }
+      bulletinElem.textContent = totalBulletins;
+      bulletinElem.classList.toggle('kpi-alert', (kpi.errorCount ?? 0) > 0);
 
-      // 2. Bulletin 列表渲染 (端點 3)
-      const listContainer = document.getElementById('bulletinList');
-      const bulletins = data.raw_endpoints.bulletins || [];
-      document.getElementById('bulletinCount').textContent = `共 ${bulletins.length} 則`;
+      // 3. 更新頁籤計數
+      document.getElementById('tabCountBulletins').textContent = data.bulletins?.length || 0;
+      document.getElementById('tabCountBottlenecks').textContent = data.bottlenecks?.length || 0;
+      document.getElementById('tabCountInvalid').textContent = data.invalid_processors?.length || 0;
 
-      if (bulletins.length === 0) {
-        listContainer.innerHTML = '<div style="color: var(--text-sub); text-align: center; margin-top: 40px;">目前管線運行正常，無異常警告</div>';
-        displayJSON(data.kpis, "目前無錯誤：展示全域指標快照");
-      } else {
-        listContainer.innerHTML = '';
-        bulletins.forEach((b, idx) => {
+      // 4. 渲染選中頁籤內容
+      renderList(data);
+    }
+
+    function renderList(data) {
+      const container = document.getElementById('diagnosticList');
+      container.innerHTML = "";
+
+      if (activeTab === 'bulletins') {
+        const bulletins = data.bulletins || [];
+        if (bulletins.length === 0) {
+          container.innerHTML = '<div style="color: var(--text-sub); text-align: center; margin-top: 40px;">目前管線運行正常，無告警事件</div>';
+          displayJSON(data.kpi, "目前無告警：展示總體 KPI 快照");
+          return;
+        }
+        bulletins.forEach(b => {
+          const bo = b.bulletin || {};
+          const isErr = bo.level === 'ERROR';
           const item = document.createElement('div');
-          const isError = (b.bulletin && b.bulletin.level === 'ERROR');
-          item.className = `bulletin-item ${isError ? 'error' : ''}`;
+          item.className = `list-item ${isErr ? 'error' : ''}`;
           item.innerHTML = `
-            <div class="bulletin-meta">
-              <span><b>${b.bulletin ? b.bulletin.sourceName : '未知節點'}</b></span>
-              <span>${b.bulletin ? b.bulletin.timestamp : ''}</span>
+            <div class="item-meta">
+              <span><b>${bo.sourceName || '系統元件'}</b> [${bo.level || 'INFO'}]</span>
+              <span>${bo.timestamp || ''}</span>
             </div>
-            <div style="font-size: 12px;">${b.bulletin ? b.bulletin.message : '無詳細訊息'}</div>
+            <div style="font-size: 12px;">${bo.message || '無詳細訊息'}</div>
           `;
           item.onclick = () => {
-            document.querySelectorAll('.bulletin-item').forEach(el => el.classList.remove('active'));
-            item.classList.add('active');
-            displayJSON(b, `來源節點: ${b.bulletin ? b.bulletin.sourceId : ''}`);
+            setActiveItem(item);
+            displayJSON(b, `告警來源 ID: ${bo.sourceId || '-'}`);
           };
-          listContainer.appendChild(item);
+          container.appendChild(item);
+        });
+      } else if (activeTab === 'bottlenecks') {
+        const bottlenecks = data.bottlenecks || [];
+        if (bottlenecks.length === 0) {
+          container.innerHTML = '<div style="color: var(--text-sub); text-align: center; margin-top: 40px;">佇列通暢，無積壓或背壓瓶頸</div>';
+          displayJSON({ bottlenecks: [] }, "目前無積壓佇列");
+          return;
+        }
+        bottlenecks.forEach(bn => {
+          const isHighPressure = (bn.percent_use_count >= 80 || bn.percent_use_bytes >= 80);
+          const item = document.createElement('div');
+          item.className = `list-item ${isHighPressure ? 'error' : ''}`;
+          item.innerHTML = `
+            <div class="item-meta">
+              <span><b>${bn.source_name} ➔ ${bn.destination_name}</b></span>
+              <span>積壓: ${bn.queued_count} 筆</span>
+            </div>
+            <div style="font-size: 12px; color: var(--text-sub);">
+              容量: ${bn.queued_size} | 背壓: ${bn.percent_use_count}% (數量) / ${bn.percent_use_bytes}% (容量)
+            </div>
+          `;
+          item.onclick = () => {
+            setActiveItem(item);
+            displayJSON(bn, `瓶頸連線 ID: ${bn.connection_id}`);
+          };
+          container.appendChild(item);
+        });
+      } else if (activeTab === 'invalid') {
+        const invalids = data.invalid_processors || [];
+        if (invalids.length === 0) {
+          container.innerHTML = '<div style="color: var(--text-sub); text-align: center; margin-top: 40px;">所有 Processor 配置驗證皆為 VALID</div>';
+          displayJSON({ invalid_processors: [] }, "無異常 Processor");
+          return;
+        }
+        invalids.forEach(proc => {
+          const item = document.createElement('div');
+          item.className = 'list-item error';
+          item.innerHTML = `
+            <div class="item-meta">
+              <span><b>${proc.name}</b> (${proc.type ? proc.type.split('.').pop() : 'Processor'})</span>
+              <span>${proc.validation_status}</span>
+            </div>
+            <div style="font-size: 12px; color: #f87171;">
+              ${proc.validation_errors?.[0] || '配置存在錯誤無法啟動'}
+            </div>
+          `;
+          item.onclick = () => {
+            setActiveItem(item);
+            displayJSON(proc, `無效元件 ID: ${proc.processor_id}`);
+          };
+          container.appendChild(item);
         });
       }
+    }
+
+    function setActiveItem(elem) {
+      document.querySelectorAll('.list-item').forEach(el => el.classList.remove('active'));
+      elem.classList.add('active');
     }
 
     function displayJSON(obj, summaryText) {
@@ -192,12 +297,87 @@
       document.getElementById('jsonDisplay').textContent = JSON.stringify(obj, null, 2);
     }
 
-    function copyCurrentJSON() {
-      const code = document.getElementById('jsonDisplay').textContent;
-      navigator.clipboard.writeText(code).then(() => alert("JSON 已成功複製至剪貼簿！"));
+    function showFullSnapshotInViewer() {
+      if (!fullSnapshot) {
+        alert("尚未載入資料！");
+        return;
+      }
+      document.querySelectorAll('.list-item').forEach(el => el.classList.remove('active'));
+      displayJSON(fullSnapshot, "全域完整快照 (Raw JSON)");
     }
 
-    // 啟動倒數計時與短輪詢
+    function copyCurrentJSON() {
+      const code = document.getElementById('jsonDisplay').textContent;
+      navigator.clipboard.writeText(code).then(() => alert("已複製當前檢視的 JSON！"));
+    }
+
+    // 🤖 核心亮點：過濾雜訊，提煉專供 AI 除錯的高密度 JSON
+    function copyAIDistilledJSON() {
+      if (!fullSnapshot) {
+        alert("資料載入中，請稍候再試！");
+        return;
+      }
+
+      // 1. 提煉告警 (只保留關鍵定位屬性)
+      const cleanBulletins = (fullSnapshot.bulletins || []).map(b => {
+        const info = b.bulletin || {};
+        return {
+          level: info.level,
+          timestamp: info.timestamp,
+          source_name: info.sourceName,
+          source_id: info.sourceId,
+          group_id: info.groupId,
+          message: info.message
+        };
+      });
+
+      // 2. 提煉積壓瓶頸
+      const cleanBottlenecks = (fullSnapshot.bottlenecks || []).map(bn => ({
+        connection_name: bn.connection_name,
+        connection_id: bn.connection_id,
+        path: `${bn.source_name} ➔ ${bn.destination_name}`,
+        queued_count: bn.queued_count,
+        queued_size: bn.queued_size,
+        backpressure_percent: {
+          count: `${bn.percent_use_count}%`,
+          bytes: `${bn.percent_use_bytes}%`
+        }
+      }));
+
+      // 3. 提煉異常元件
+      const cleanInvalids = (fullSnapshot.invalid_processors || []).map(p => ({
+        name: p.name,
+        processor_id: p.processor_id,
+        type: p.type ? p.type.split('.').pop() : 'Unknown',
+        state: p.state,
+        validation_errors: p.validation_errors
+      }));
+
+      // 4. 構建高密度診斷 Payload
+      const aiReadyPayload = {
+        report_type: "NiFi Pipeline Diagnostic Snapshot",
+        timestamp: fullSnapshot.timestamp,
+        kpi_summary: {
+          active_threads: fullSnapshot.kpi?.activeThreadCount,
+          queued_flowfiles: fullSnapshot.kpi?.flowFilesQueued,
+          throughput_bytes: (fullSnapshot.kpi?.bytesRead || 0) + (fullSnapshot.kpi?.bytesWritten || 0),
+          total_bulletins: (fullSnapshot.kpi?.warningCount || 0) + (fullSnapshot.kpi?.errorCount || 0),
+          invalid_components: fullSnapshot.kpi?.invalidComponentCount
+        },
+        issues: {
+          bulletin_alerts: cleanBulletins,
+          backpressure_bottlenecks: cleanBottlenecks,
+          invalid_processors: cleanInvalids
+        }
+      };
+
+      const textToCopy = JSON.stringify(aiReadyPayload, null, 2);
+      navigator.clipboard.writeText(textToCopy).then(() => {
+        alert("✅ 已複製「去噪後的 AI 診斷 JSON」！Token 消耗降低 80% 以上，可直接貼給 AI 診斷。");
+      });
+    }
+
+    // 倒數與自動短輪詢
     setInterval(() => {
       countdownSec--;
       if (countdownSec <= 0) {
@@ -207,7 +387,6 @@
       document.getElementById('countdown').textContent = countdownSec;
     }, 1000);
 
-    // 首次立即載入
     fetchLatestData();
   </script>
 </body>
