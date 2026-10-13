@@ -484,7 +484,7 @@ def setup_local_2_sql_pipeline(local_pg, dbcp_svc, input_dir=DEFAULT_RAW_DIR, ta
 
         "Input Directory": input_dir,
 
-        "Listing Strategy": "Tracking Timestamps",
+        "Listing Strategy": "timestamps",
 
         "Recurse Subdirectories": "true",
 
