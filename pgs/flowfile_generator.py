@@ -15,7 +15,7 @@ def create_flowfile_generator_pg(parent_pg=None, **kwargs):
         t = nipyapi.canvas.get_processor_type(name)
         return t[0] if isinstance(t, list) else t
 
-    # 1. 建立獨立的子 Process Group (確保 generator_pg.component.name 與 routes 正常)
+    # 1. 建立獨立的 Process Group
     existing_pgs = nipyapi.canvas.list_all_process_groups(parent_pg.id)
     gen_pg = next(
         (pg for pg in existing_pgs if pg.component.name == GENERATOR_PG_NAME),
@@ -28,7 +28,7 @@ def create_flowfile_generator_pg(parent_pg=None, **kwargs):
             location=(300, 300),
         )
 
-    # 2. 建立狂噴資料的 Generator (每 0.2 秒一顆)
+    # 2. 建立資料產生器 (每 0.2 秒狂噴)
     gen = nipyapi.canvas.create_processor(
         parent_pg=gen_pg,
         processor=get_type("GenerateFlowFile"),
@@ -42,7 +42,7 @@ def create_flowfile_generator_pg(parent_pg=None, **kwargs):
         ),
     )
 
-    # 3. 建立 Sink (故意停止以堆積佇列)
+    # 3. 建立下游 Sink (保持停止，讓 Queue 持續積壓)
     sink = nipyapi.canvas.create_processor(
         parent_pg=gen_pg,
         processor=get_type("LogAttribute"),
@@ -56,7 +56,7 @@ def create_flowfile_generator_pg(parent_pg=None, **kwargs):
         ),
     )
 
-    # 4. 建立連線
+    # 4. 接線
     nipyapi.canvas.create_connection(
         source=gen,
         target=sink,
@@ -64,16 +64,12 @@ def create_flowfile_generator_pg(parent_pg=None, **kwargs):
         name="Pressure_Queue",
     )
 
-    # 5. 故意放一個無效的處理器 (讓儀表板出現 Invalid Processors 警示)
+    # 5. 放一個無效處理器 (讓儀表板抓到 Invalid Processors)
     nipyapi.canvas.create_processor(
         parent_pg=gen_pg,
         processor=get_type("UpdateAttribute"),
         location=(400, 100),
         name="Invalid_Test_Processor",
     )
-
-    # 6. 先啟動產生器，並確保 Sink 保持停止
-    nipyapi.canvas.schedule_processor(gen, True)
-    nipyapi.canvas.schedule_processor(sink, False)
 
     return gen_pg
