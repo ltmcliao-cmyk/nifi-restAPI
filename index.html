@@ -17,32 +17,151 @@
       --primary: #38bdf8;
     }
 
-    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-    body { background-color: var(--bg); color: var(--text); padding: 24px; }
-    .container { max-width: 1300px; margin: 0 auto; }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
 
-    header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; padding-bottom: 16px; border-bottom: 1px solid var(--border); }
-    .status-badge { display: inline-flex; align-items: center; gap: 8px; font-size: 0.9rem; padding: 6px 12px; border-radius: 9999px; background: #064e3b; color: #6ee7b7; }
-    .status-badge.offline { background: #7f1d1d; color: #fca5a5; }
-    .dot { width: 8px; height: 8px; border-radius: 50%; background-color: currentColor; }
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      padding: 24px;
+    }
 
-    .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin-bottom: 24px; }
-    .kpi-card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 10px; padding: 18px; }
-    .kpi-label { font-size: 0.8rem; color: var(--text-muted); margin-bottom: 6px; }
-    .kpi-value { font-size: 1.6rem; font-weight: 700; color: var(--primary); }
-    .kpi-value.alert { color: var(--danger); }
-    .kpi-value.warn { color: var(--warning); }
+    .container {
+      max-width: 1300px;
+      margin: 0 auto;
+    }
 
-    .section-title { font-size: 1.1rem; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
-    .card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 10px; padding: 20px; margin-bottom: 24px; }
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 24px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--border);
+    }
 
-    table { width: 100%; border-collapse: collapse; text-align: left; font-size: 0.9rem; }
-    th { color: var(--text-muted); padding: 10px; border-bottom: 1px solid var(--border); }
-    td { padding: 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
-    .empty-msg { color: var(--text-muted); font-size: 0.9rem; text-align: center; padding: 16px 0; }
-    .badge { padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 600; display: inline-block; }
-    .badge-danger { background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid #ef4444; }
-    .badge-warn { background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid #f59e0b; }
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.9rem;
+      padding: 6px 14px;
+      border-radius: 9999px;
+      background: #064e3b;
+      color: #6ee7b7;
+    }
+
+    .status-badge.offline {
+      background: #7f1d1d;
+      color: #fca5a5;
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background-color: currentColor;
+    }
+
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+
+    .kpi-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 18px;
+    }
+
+    .kpi-label {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      margin-bottom: 6px;
+    }
+
+    .kpi-value {
+      font-size: 1.6rem;
+      font-weight: 700;
+      color: var(--primary);
+    }
+
+    .kpi-value.alert {
+      color: var(--danger);
+    }
+
+    .kpi-value.warn {
+      color: var(--warning);
+    }
+
+    .section-title {
+      font-size: 1.1rem;
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 20px;
+      margin-bottom: 24px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      text-align: left;
+      font-size: 0.9rem;
+    }
+
+    th {
+      color: var(--text-muted);
+      padding: 10px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    td {
+      padding: 10px;
+      border-bottom: 1px solid var(--border);
+      vertical-align: top;
+    }
+
+    .empty-msg {
+      color: var(--text-muted);
+      font-size: 0.9rem;
+      text-align: center;
+      padding: 16px 0;
+    }
+
+    .badge {
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      display: inline-block;
+    }
+
+    .badge-danger {
+      background: rgba(239, 68, 68, 0.2);
+      color: #f87171;
+      border: 1px solid #ef4444;
+    }
+
+    .badge-warn {
+      background: rgba(245, 158, 11, 0.2);
+      color: #fbbf24;
+      border: 1px solid #f59e0b;
+    }
   </style>
 </head>
 <body>
@@ -50,7 +169,7 @@
     <header>
       <div>
         <h1>Apache NiFi 叢集即時監控</h1>
-        <p style="color: var(--text-muted); font-size: 0.85rem; margin-top: 4px;">資料來源：Firebase Realtime Database</p>
+        <p style="color: var(--text-muted); font-size: 0.85rem; margin-top: 4px;">後端通道：Firebase Realtime Database</p>
       </div>
       <div id="connStatus" class="status-badge offline">
         <span class="dot"></span>
@@ -58,7 +177,7 @@
       </div>
     </header>
 
-    <!-- KPI 統計 -->
+    <!-- KPI 總覽 -->
     <div class="kpi-grid">
       <div class="kpi-card">
         <div class="kpi-label">Active Threads</div>
@@ -86,7 +205,7 @@
       </div>
     </div>
 
-    <!-- 瓶頸連線 (Bottlenecks) -->
+    <!-- 佇列瓶頸 -->
     <div class="card">
       <h2 class="section-title">🚨 積壓與背壓瓶頸連線 (Bottlenecks)</h2>
       <div id="bottlenecksContainer">
@@ -112,25 +231,6 @@
       const sizes = ["B", "KB", "MB", "GB", "TB"];
       const i = Math.floor(Math.log(bytes) / Math.log(k));
       return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
-    }
-
-    async function refreshMonitor() {
-      try {
-        const response = await fetch(FIREBASE_URL);
-        if (!response.ok) throw new Error(HTTP ${response.status});
-        const data = await response.json();
-
-        if (!data) {
-          setConnectionStatus(false, "資料庫節點尚無資料");
-          return;
-        }
-
-        renderDashboard(data);
-        setConnectionStatus(true, 最後更新: ${new Date(data.timestamp).toLocaleTimeString()});
-      } catch (err) {
-        setConnectionStatus(false, "無法連線至 Firebase");
-        console.error(err);
-      }
     }
 
     function setConnectionStatus(isOnline, text) {
@@ -162,7 +262,7 @@
       warnEl.innerText = kpi.warningCount || 0;
       warnEl.className = "kpi-value" + ((kpi.warningCount || 0) > 0 ? " warn" : "");
 
-      // 渲染 Bottlenecks
+      // 渲染 Bottlenecks 表格
       const bContainer = document.getElementById("bottlenecksContainer");
       if (data.bottlenecks && data.bottlenecks.length > 0) {
         let html = `<table>
@@ -193,7 +293,7 @@
         bContainer.innerHTML = <p class="empty-msg">佇列正常，無背壓或堵塞連線</p>;
       }
 
-      // 渲染 Invalid Processors
+      // 渲染 Invalid Processors 表格
       const pContainer = document.getElementById("invalidContainer");
       if (data.invalid_processors && data.invalid_processors.length > 0) {
         let html = `<table>
@@ -210,7 +310,7 @@
           const errors = (p.validation_errors || []).join("<br>");
           html += `<tr>
             <td><strong>${p.name}</strong></td>
-            <td>${p.type.split('.').pop()}</td>
+            <td>${(p.type || "").split('.').pop()}</td>
             <td><span class="badge badge-danger">${p.validation_status}</span></td>
             <td style="color: #fca5a5; font-size: 0.8rem;">${errors || "無具體說明"}</td>
           </tr>`;
@@ -222,7 +322,29 @@
       }
     }
 
-    // 每 3 秒拉取一次
+    async function refreshMonitor() {
+      try {
+        const response = await fetch(FIREBASE_URL);
+        if (!response.ok) {
+          throw new Error(HTTP ${response.status});
+        }
+        const data = await response.json();
+
+        if (!data) {
+          setConnectionStatus(false, "資料庫目前無資料 (請確認 Python 程式是否正在運行)");
+          return;
+        }
+
+        renderDashboard(data);
+        const updateTime = data.timestamp ? new Date(data.timestamp).toLocaleTimeString() : new Date().toLocaleTimeString();
+        setConnectionStatus(true, 最後同步: ${updateTime});
+      } catch (err) {
+        setConnectionStatus(false, "無法連線至資料庫");
+        console.error("Fetch error:", err);
+      }
+    }
+
+    // 每 3 秒自動更新一次
     setInterval(refreshMonitor, 3000);
     refreshMonitor();
   </script>
