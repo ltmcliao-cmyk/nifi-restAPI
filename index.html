@@ -1,291 +1,488 @@
 <!DOCTYPE html>
 <html lang="zh-Hant">
 <head>
-  <meta charset="UTF-8">
-  <title>NiFi 流程即時監控</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NiFi 即時流程監控中心</title>
   <style>
     :root {
-      --bg: #0f172a;
+      --bg-dark: #0f172a;
       --card-bg: #1e293b;
-      --border: #334155;
-      --text: #f8fafc;
+      --card-border: #334155;
+      --text-main: #f8fafc;
       --text-muted: #94a3b8;
-      --accent: #38bdf8;
-      --danger: #ef4444;
-      --warning: #f59e0b;
-      --success: #22c55e;
+      --accent-flow: #38bdf8;
+      --accent-success: #10b981;
+      --accent-warn: #f59e0b;
+      --accent-err: #ef4444;
     }
-    body {
-      background-color: var(--bg);
-      color: var(--text);
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+
+    * {
+      box-sizing: border-box;
       margin: 0;
-      padding: 24px;
+      padding: 0;
     }
-    .header {
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      background-color: var(--bg-dark);
+      color: var(--text-main);
+      padding: 24px;
+      line-height: 1.5;
+    }
+
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+    }
+
+    /* 頂部導覽與狀態列 */
+    header {
       display: flex;
       justify-content: space-between;
       align-items: center;
+      padding-bottom: 20px;
+      border-bottom: 1px solid var(--card-border);
       margin-bottom: 24px;
-    }
-    .status-badge {
-      padding: 6px 14px;
-      border-radius: 999px;
-      font-size: 13px;
-      font-weight: 600;
-    }
-    .status-online { background-color: rgba(34, 197, 94, 0.2); color: var(--success); }
-    .status-offline { background-color: rgba(239, 68, 68, 0.2); color: var(--danger); }
-    
-    .actions-bar {
-      display: flex;
+      flex-wrap: wrap;
       gap: 12px;
-      margin-bottom: 20px;
     }
-    .btn {
-      background-color: var(--card-bg);
-      border: 1px solid var(--border);
-      color: var(--text);
-      padding: 8px 16px;
-      border-radius: 6px;
-      cursor: pointer;
-      font-weight: 500;
-      transition: all 0.2s;
-    }
-    .btn:hover { background-color: var(--border); border-color: var(--accent); }
-    .btn-primary { background-color: #0284c7; border-color: #0284c7; }
-    .btn-primary:hover { background-color: #0369a1; }
 
-    .grid-kpi {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-      gap: 16px;
-      margin-bottom: 24px;
-    }
-    .card {
-      background-color: var(--card-bg);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 16px;
-    }
-    .card-title {
-      font-size: 13px;
-      color: var(--text-muted);
-      margin-bottom: 8px;
-    }
-    .card-value {
-      font-size: 26px;
+    .brand-title {
+      font-size: 1.4rem;
       font-weight: 700;
-      color: var(--text);
+      letter-spacing: 0.5px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
     }
 
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 0.85rem;
+    }
+
+    .connection-status {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 12px;
+      border-radius: 999px;
+      background: #334155;
+      color: var(--text-muted);
+      font-weight: 500;
+      transition: all 0.3s ease;
+    }
+
+    .connection-status.connected {
+      background: rgba(16, 185, 129, 0.15);
+      color: var(--accent-success);
+    }
+
+    .connection-status.disconnected {
+      background: rgba(239, 68, 68, 0.15);
+      color: var(--accent-err);
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+
+    .update-time {
+      color: var(--text-muted);
+    }
+
+    /* 區塊標題 */
     .section-title {
-      font-size: 16px;
+      font-size: 1.1rem;
       font-weight: 600;
-      margin: 24px 0 12px;
+      margin-bottom: 16px;
       display: flex;
       align-items: center;
       gap: 8px;
+      color: #e2e8f0;
     }
+
+    /* Process Group 卡片網格 */
+    .pg-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+      gap: 20px;
+      margin-bottom: 36px;
+    }
+
+    .pg-card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 10px;
+      padding: 18px;
+      position: relative;
+      transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .pg-card:hover {
+      transform: translateY(-2px);
+    }
+
+    .pg-card.is-active {
+      border-color: rgba(56, 189, 248, 0.7);
+      box-shadow: 0 0 20px rgba(56, 189, 248, 0.12);
+    }
+
+    .pg-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 12px;
+      gap: 8px;
+    }
+
+    .pg-name {
+      font-size: 1.05rem;
+      font-weight: 600;
+      color: #ffffff;
+      word-break: break-all;
+    }
+
+    .pg-badge {
+      font-size: 0.75rem;
+      padding: 2px 8px;
+      border-radius: 6px;
+      font-weight: 600;
+      white-space: nowrap;
+      background: #334155;
+      color: var(--text-muted);
+    }
+
+    .pg-badge.running {
+      background: rgba(16, 185, 129, 0.2);
+      color: #34d399;
+    }
+
+    /* FlowFile 動態流動軌道 */
+    .stream-container {
+      margin: 14px 0;
+    }
+
+    .stream-label-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-bottom: 4px;
+    }
+
+    .stream-track {
+      height: 8px;
+      background: #090d16;
+      border-radius: 4px;
+      overflow: hidden;
+      position: relative;
+      border: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    .stream-flow {
+      height: 100%;
+      width: 100%;
+      opacity: 0.15;
+      background: repeating-linear-gradient(
+        90deg,
+        #475569 0px,
+        #475569 10px,
+        transparent 10px,
+        transparent 20px
+      );
+    }
+
+    /* 運行中的動態傳輸效果 */
+    .stream-flow.active {
+      opacity: 1;
+      background: repeating-linear-gradient(
+        90deg,
+        var(--accent-flow) 0px,
+        var(--accent-flow) 14px,
+        rgba(56, 189, 248, 0.2) 14px,
+        rgba(56, 189, 248, 0.2) 28px
+      );
+      background-size: 56px 100%;
+      animation: flowMoving 0.9s linear infinite;
+    }
+
+    @keyframes flowMoving {
+      0% { background-position: 0 0; }
+      100% { background-position: 56px 0; }
+    }
+
+    /* PG 數據欄位 */
+    .pg-stats-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 10px;
+      margin-top: 14px;
+    }
+
+    .stat-box {
+      background: #0f172a;
+      padding: 10px 12px;
+      border-radius: 6px;
+      border: 1px solid rgba(255, 255, 255, 0.03);
+    }
+
+    .stat-title {
+      font-size: 0.7rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 2px;
+    }
+
+    .stat-val {
+      font-size: 1.05rem;
+      font-weight: 700;
+      color: #f1f5f9;
+    }
+
+    .stat-val.has-queue {
+      color: var(--accent-warn);
+    }
+
+    .stat-val.has-active {
+      color: var(--accent-flow);
+    }
+
+    /* 警報/異常 Bulletin 表格 */
+    .bulletins-section {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 10px;
+      padding: 20px;
+    }
+
     table {
       width: 100%;
       border-collapse: collapse;
-      background-color: var(--card-bg);
-      border-radius: 8px;
-      overflow: hidden;
-      border: 1px solid var(--border);
-    }
-    th, td {
-      padding: 10px 14px;
+      font-size: 0.85rem;
       text-align: left;
-      font-size: 13px;
-      border-bottom: 1px solid var(--border);
     }
-    th { background-color: #162032; color: var(--text-muted); }
-    .empty-state {
-      padding: 16px;
-      text-align: center;
+
+    th {
       color: var(--text-muted);
-      font-size: 13px;
+      font-weight: 600;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--card-border);
+      font-size: 0.75rem;
+      text-transform: uppercase;
     }
-    .badge-warn { color: var(--warning); }
-    .badge-err { color: var(--danger); font-weight: bold; }
+
+    td {
+      padding: 12px;
+      border-bottom: 1px solid rgba(51, 65, 85, 0.5);
+      color: #cbd5e1;
+      vertical-align: top;
+      word-break: break-all;
+    }
+
+    tr:last-child td {
+      border-bottom: none;
+    }
+
+    .badge-err {
+      background: rgba(239, 68, 68, 0.2);
+      color: #f87171;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+
+    .badge-warn {
+      background: rgba(245, 158, 11, 0.2);
+      color: #fbbf24;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+
+    .empty-placeholder {
+      text-align: center;
+      padding: 28px;
+      color: var(--text-muted);
+      font-size: 0.9rem;
+    }
   </style>
 </head>
 <body>
+  <div class="container">
+    <header>
+      <div class="brand-title">
+        <span>⚡ NiFi Process Groups 即時監控</span>
+      </div>
+      <div class="header-actions">
+        <div id="connectionStatus" class="connection-status">
+          <span class="status-dot"></span>
+          <span id="connectionText">連線中...</span>
+        </div>
+        <div id="lastUpdated" class="update-time">-</div>
+      </div>
+    </header>
 
-  <div class="header">
-    <h2 style="margin: 0;">NiFi 流程即時監控</h2>
-    <div>
-      <span id="connectionStatus" class="status-badge status-offline">連線檢查中...</span>
-      <span id="lastUpdated" style="font-size: 13px; color: var(--text-muted); margin-left: 12px;"></span>
+    <!-- PG 獨立監控區域 -->
+    <div class="section-title">流程群組運行動態 (Process Groups)</div>
+    <div id="pgContainer" class="pg-grid">
+      <div class="empty-placeholder">載入流程群組資料中...</div>
+    </div>
+
+    <!-- 系統 Bulletin 警告/錯誤 -->
+    <div class="bulletins-section">
+      <div class="section-title" style="margin-bottom: 12px;">即時公告與異常訊息 (Bulletins)</div>
+      <table>
+        <thead>
+          <tr>
+            <th style="width: 90px;">等級</th>
+            <th style="width: 220px;">來源元件</th>
+            <th>訊息內容</th>
+          </tr>
+        </thead>
+        <tbody id="bulletinsBody">
+          <tr>
+            <td colspan="3" class="empty-placeholder">暫無異常公告</td>
+          </tr>
+        </tbody>
+      </table>
     </div>
   </div>
-
-  <div class="actions-bar">
-    <button class="btn btn-primary" onclick="copyCurrentJson()">📋 複製完整 JSON (餵給 AI / Debug)</button>
-    <button class="btn" onclick="fetchData()">🔄 手動整理</button>
-  </div>
-
-  <!-- KPI 區塊：已整合 controller_status + aggregateSnapshot -->
-  <div class="grid-kpi">
-    <div class="card">
-      <div class="card-title">總連線數 (Connections)</div>
-      <div class="card-value" id="kpiConnections">-</div>
-    </div>
-    <div class="card">
-      <div class="card-title">佇列 FlowFiles (Queued)</div>
-      <div class="card-value" id="kpiQueuedFiles">-</div>
-    </div>
-    <div class="card">
-      <div class="card-title">執行中 (Running)</div>
-      <div class="card-value" id="kpiRunning">-</div>
-    </div>
-    <div class="card">
-      <div class="card-title">已停止 (Stopped)</div>
-      <div class="card-value" id="kpiStopped">-</div>
-    </div>
-    <div class="card">
-      <div class="card-title">有效執行緒 (Active Threads)</div>
-      <div class="card-value" id="kpiThreads">-</div>
-    </div>
-    <div class="card">
-      <div class="card-title">異常元件數 (Invalid)</div>
-      <div class="card-value" id="kpiInvalid">-</div>
-    </div>
-  </div>
-
-  <!-- 壅塞連線監控 (Bottlenecks) -->
-  <div class="section-title">🚨 壅塞 / 佇列積壓連線 (Bottlenecks)</div>
-  <table>
-    <thead>
-      <tr>
-        <th>連線名稱</th>
-        <th>來源端</th>
-        <th>目的端</th>
-        <th>積壓數量</th>
-        <th>容量使用率</th>
-      </tr>
-    </thead>
-    <tbody id="bottlenecksBody"></tbody>
-  </table>
-
-  <!-- 無效處理器清單 -->
-  <div class="section-title">⚠️ 無效處理器 (Invalid Processors)</div>
-  <table>
-    <thead>
-      <tr>
-        <th>名稱</th>
-        <th>狀態</th>
-        <th>類型</th>
-        <th>驗證錯誤原因</th>
-      </tr>
-    </thead>
-    <tbody id="invalidProcessorsBody"></tbody>
-  </table>
-
-  <!-- 系統告警日誌 (Bulletins) -->
-  <div class="section-title">📜 即時 Bulletin 告警通知</div>
-  <table>
-    <thead>
-      <tr>
-        <th>層級</th>
-        <th>節點 / 元件</th>
-        <th>訊息內容</th>
-      </tr>
-    </thead>
-    <tbody id="bulletinsBody"></tbody>
-  </table>
 
   <script>
-    const FIREBASE_URL = "https://nifi-d2de1-default-rtdb.firebaseio.com/nifi_monitor.json";
-    let latestData = null;
+    // 填入 Firebase 即時資料庫 URL 或 API 節點
+    const FIREBASE_URL = "https://your-firebase-database.firebasedatabase.app/nifi_status.json";
+    const POLL_INTERVAL = 3000;
 
-    function setConnectionStatus(isOnline, message) {
-      const el = document.getElementById("connectionStatus");
-      if (!el) return;
-      el.className = `status-badge ${isOnline ? "status-online" : "status-offline"}`;
-      el.textContent = message;
+    const connectionStatusEl = document.getElementById("connectionStatus");
+    const connectionTextEl = document.getElementById("connectionText");
+    const lastUpdatedEl = document.getElementById("lastUpdated");
+    const pgContainer = document.getElementById("pgContainer");
+    const bulletinsBody = document.getElementById("bulletinsBody");
+
+    function setConnectionStatus(isConnected, text) {
+      if (isConnected) {
+        connectionStatusEl.className = "connection-status connected";
+        connectionTextEl.textContent = text || "連線正常";
+      } else {
+        connectionStatusEl.className = "connection-status disconnected";
+        connectionTextEl.textContent = text || "連線中斷";
+      }
     }
 
-    function copyCurrentJson() {
-      if (!latestData) {
-        alert("尚無可複製的資料！");
-        return;
+    // 解析各 PG 狀態（相容 NiFi 原生快照結構或自定義結構）
+    function parseProcessGroups(data) {
+      if (!data) return [];
+
+      // 若後端已預先處理為清單
+      if (Array.isArray(data.processGroups)) return data.processGroups;
+      if (Array.isArray(data.pgs)) return data.pgs;
+
+      // 若為 NiFi aggregateSnapshot 原始樹狀結構
+      const rootSnap = data.processGroupStatus?.aggregateSnapshot ||
+                       data.aggregateSnapshot ||
+                       (data.status && data.status.aggregateSnapshot);
+
+      if (rootSnap && Array.isArray(rootSnap.processGroupStatusSnapshots)) {
+        return rootSnap.processGroupStatusSnapshots.map(item => {
+          const snap = item.processGroupStatusSnapshot || item;
+          return {
+            id: snap.id,
+            name: snap.name || "未命名流程群組",
+            activeThreadCount: Number(snap.activeThreadCount || 0),
+            queuedCount: Number(snap.flowFilesQueued || snap.queuedCount || 0),
+            bytesQueued: snap.bytesQueued || "0 B",
+            flowFilesIn: Number(snap.flowFilesIn || snap.bytesIn || 0),
+            flowFilesOut: Number(snap.flowFilesOut || snap.bytesOut || 0)
+          };
+        });
       }
-      navigator.clipboard.writeText(JSON.stringify(latestData, null, 2))
-        .then(() => alert("已複製即時 JSON 到剪貼簿！可直接貼給 AI 分析。"))
-        .catch(err => console.error("複製失敗", err));
+
+      return [];
     }
 
     function renderDashboard(data) {
-      if (!data) return;
-      latestData = data;
+      lastUpdatedEl.textContent = `最後同步：${new Date().toLocaleTimeString()}`;
 
-      // 1. KPI 讀取與計算
-      const kpi = data.kpi || {};
-      const ctrl = data.controller_status || {};
-
-      let totalConnections = data.total_connections;
-      if (totalConnections === undefined && Array.isArray(data.process_groups_summary)) {
-        totalConnections = data.process_groups_summary.reduce((acc, pg) => acc + (pg.connection_count || 0), 0);
-      }
-      document.getElementById("kpiConnections").textContent = totalConnections ?? "-";
-      document.getElementById("kpiQueuedFiles").textContent = kpi.flowFilesQueued ?? 0;
-      
-      // 從 controller_status 讀取 running / stopped
-      document.getElementById("kpiRunning").textContent = ctrl.runningCount ?? "-";
-      document.getElementById("kpiStopped").textContent = ctrl.stoppedCount ?? "-";
-      document.getElementById("kpiThreads").textContent = kpi.activeThreadCount ?? 0;
-      
-      const invalidCount = kpi.invalidComponentCount || (data.invalid_processors ? data.invalid_processors.length : 0);
-      const invalidEl = document.getElementById("kpiInvalid");
-      invalidEl.textContent = invalidCount;
-      invalidEl.style.color = invalidCount > 0 ? "var(--danger)" : "inherit";
-
-      document.getElementById("lastUpdated").textContent = `最後同步：${data.timestamp ? new Date(data.timestamp).toLocaleTimeString() : new Date().toLocaleTimeString()}`;
-
-      // 2. 渲染壅塞連線 (Bottlenecks)
-      const bottlenecksBody = document.getElementById("bottlenecksBody");
-      const bottlenecks = data.bottlenecks || [];
-      if (bottlenecks.length === 0) {
-        bottlenecksBody.innerHTML = `<tr><td colspan="5" class="empty-state">目前無積壓或達到背壓門檻的連線。</td></tr>`;
+      // 1. 渲染各 Process Group 卡片
+      const pgs = parseProcessGroups(data);
+      if (pgs.length === 0) {
+        pgContainer.innerHTML = `<div class="empty-placeholder">未偵測到任何子 Process Group</div>`;
       } else {
-        bottlenecksBody.innerHTML = bottlenecks.map(b => `
-          <tr>
-            <td><strong>${b.connection_name || b.connection_id}</strong></td>
-            <td>${b.source_name || "-"}</td>
-            <td>${b.destination_name || "-"}</td>
-            <td><span class="badge-err">${b.queued_count}</span> (${b.queued_size || "0 B"})</td>
-            <td>${b.percent_use_count ?? 0}%</td>
-          </tr>
-        `).join("");
+        pgContainer.innerHTML = pgs.map(pg => {
+          // 當執行緒 > 0 或 5 分鐘內有流量進出時視為流動中
+          const isFlowing = (pg.activeThreadCount > 0) || (pg.flowFilesIn > 0) || (pg.flowFilesOut > 0);
+          const hasQueued = (pg.queuedCount > 0);
+
+          return `
+            <div class="pg-card ${isFlowing ? 'is-active' : ''}">
+              <div class="pg-header">
+                <span class="pg-name">${pg.name}</span>
+                <span class="pg-badge ${isFlowing ? 'running' : ''}">
+                  ${isFlowing ? '⚡ 流動中' : '💤 閒置'}
+                </span>
+              </div>
+
+              <!-- 動態虛線傳輸條 -->
+              <div class="stream-container">
+                <div class="stream-label-row">
+                  <span>FlowFile Stream</span>
+                  <span>${isFlowing ? '傳輸中' : '靜止'}</span>
+                </div>
+                <div class="stream-track">
+                  <div class="stream-flow ${isFlowing ? 'active' : ''}"></div>
+                </div>
+              </div>
+
+              <div class="pg-stats-grid">
+                <div class="stat-box">
+                  <div class="stat-title">佇列 (Queued)</div>
+                  <div class="stat-val ${hasQueued ? 'has-queue' : ''}">
+                    ${pg.queuedCount.toLocaleString()} <span style="font-size:0.75rem;font-weight:normal;color:#94a3b8;">筆</span>
+                  </div>
+                </div>
+
+                <div class="stat-box">
+                  <div class="stat-title">執行緒 (Threads)</div>
+                  <div class="stat-val ${pg.activeThreadCount > 0 ? 'has-active' : ''}">
+                    ${pg.activeThreadCount}
+                  </div>
+                </div>
+
+                <div class="stat-box">
+                  <div class="stat-title">流入 (In / 5m)</div>
+                  <div class="stat-val">${pg.flowFilesIn.toLocaleString()}</div>
+                </div>
+
+                <div class="stat-box">
+                  <div class="stat-title">流出 (Out / 5m)</div>
+                  <div class="stat-val">${pg.flowFilesOut.toLocaleString()}</div>
+                </div>
+              </div>
+            </div>
+          `;
+        }).join("");
       }
 
-      // 3. 渲染無效處理器 (Invalid Processors)
-      const invalidBody = document.getElementById("invalidProcessorsBody");
-      const invalidList = data.invalid_processors || [];
-      if (invalidList.length === 0) {
-        invalidBody.innerHTML = `<tr><td colspan="4" class="empty-state">目前無任何異常或無效處理器。</td></tr>`;
-      } else {
-        invalidBody.innerHTML = invalidList.map(p => `
-          <tr>
-            <td><strong style="color: var(--danger);">${p.name || p.processor_id}</strong></td>
-            <td>${p.state || "-"}</td>
-            <td>${p.type || "-"}</td>
-            <td>${(p.validation_errors || []).join("<br>") || "驗證失敗"}</td>
-          </tr>
-        `).join("");
-      }
+      // 2. 渲染 Bulletins
+      const rawBulletins = data.bulletins ||
+                           data.bulletinBoard?.bulletins ||
+                           (data.bulletinBoard && data.bulletinBoard.bulletins) || [];
 
-      // 4. 渲染告警日誌 (Bulletins)
-      const bulletinsBody = document.getElementById("bulletinsBody");
-      const bulletins = data.bulletins || [];
-      if (bulletins.length === 0) {
-        bulletinsBody.innerHTML = `<tr><td colspan="3" class="empty-state">目前無即時警告或錯誤告警。</td></tr>`;
+      if (!rawBulletins || rawBulletins.length === 0) {
+        bulletinsBody.innerHTML = `<tr><td colspan="3" class="empty-placeholder">目前無異常警報</td></tr>`;
       } else {
-        bulletinsBody.innerHTML = bulletins.slice(0, 10).map(b => {
-          const item = b.bulletin || {};
+        bulletinsBody.innerHTML = rawBulletins.slice(0, 10).map(b => {
+          const item = b.bulletin || b;
           const isErr = item.level === "ERROR";
           return `
             <tr>
@@ -311,9 +508,9 @@
       }
     }
 
-    // 啟動與定期輪詢
+    // 啟動定時輪詢
     fetchData();
-    setInterval(fetchData, 5000);
+    setInterval(fetchData, POLL_INTERVAL);
   </script>
 </body>
 </html>
