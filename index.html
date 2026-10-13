@@ -1,227 +1,230 @@
 <!DOCTYPE html>
-<html lang="zh-TW">
+<html lang="zh-Hant">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>NiFi 監控狀態儀表板</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-</head>
-<body class="p-6 bg-slate-50 text-slate-800">
-  <div class="max-w-7xl mx-auto space-y-6">
+  <title>Apache NiFi 即時監控儀表板</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card-bg: #1e293b;
+      --border: #334155;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --success: #10b981;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+      --primary: #38bdf8;
+    }
 
-    <!-- 頂部標題與控制列 -->
-    <header class="flex flex-col md:flex-row md:items-center md:justify-between pb-4 border-b border-slate-200 gap-4">
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background-color: var(--bg); color: var(--text); padding: 24px; }
+    .container { max-width: 1300px; margin: 0 auto; }
+
+    header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; padding-bottom: 16px; border-bottom: 1px solid var(--border); }
+    .status-badge { display: inline-flex; align-items: center; gap: 8px; font-size: 0.9rem; padding: 6px 12px; border-radius: 9999px; background: #064e3b; color: #6ee7b7; }
+    .status-badge.offline { background: #7f1d1d; color: #fca5a5; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background-color: currentColor; }
+
+    .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin-bottom: 24px; }
+    .kpi-card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 10px; padding: 18px; }
+    .kpi-label { font-size: 0.8rem; color: var(--text-muted); margin-bottom: 6px; }
+    .kpi-value { font-size: 1.6rem; font-weight: 700; color: var(--primary); }
+    .kpi-value.alert { color: var(--danger); }
+    .kpi-value.warn { color: var(--warning); }
+
+    .section-title { font-size: 1.1rem; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+    .card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 10px; padding: 20px; margin-bottom: 24px; }
+
+    table { width: 100%; border-collapse: collapse; text-align: left; font-size: 0.9rem; }
+    th { color: var(--text-muted); padding: 10px; border-bottom: 1px solid var(--border); }
+    td { padding: 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+    .empty-msg { color: var(--text-muted); font-size: 0.9rem; text-align: center; padding: 16px 0; }
+    .badge { padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 600; display: inline-block; }
+    .badge-danger { background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid #ef4444; }
+    .badge-warn { background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid #f59e0b; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
       <div>
-        <h1 class="text-2xl font-bold tracking-tight text-slate-900">NiFi 監控狀態</h1>
-        <p id="last-updated" class="text-sm text-slate-500 mt-1">最後更新：載入中...</p>
+        <h1>Apache NiFi 叢集即時監控</h1>
+        <p style="color: var(--text-muted); font-size: 0.85rem; margin-top: 4px;">資料來源：Firebase Realtime Database</p>
       </div>
-      <div class="flex items-center gap-3">
-        <label for="cfg-interval" class="text-sm text-slate-600 font-medium">更新頻率：</label>
-        <select id="cfg-interval" class="bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-          <option value="5" selected>5 秒</option>
-          <option value="10">10 秒</option>
-          <option value="30">30 秒</option>
-          <option value="60">60 秒</option>
-        </select>
-        <button id="btn-sync" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-1.5 rounded-lg text-sm font-medium shadow-sm transition active:scale-95">
-          手動同步
-        </button>
+      <div id="connStatus" class="status-badge offline">
+        <span class="dot"></span>
+        <span id="connText">連線中...</span>
       </div>
     </header>
 
-    <!-- KPI 數據卡片 -->
-    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-      <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
-        <div class="text-xs font-semibold text-slate-500 uppercase tracking-wider">執行中處理器</div>
-        <div id="kpi-running" class="text-3xl font-bold text-emerald-600 mt-2">-</div>
+    <!-- KPI 統計 -->
+    <div class="kpi-grid">
+      <div class="kpi-card">
+        <div class="kpi-label">Active Threads</div>
+        <div id="kpi-threads" class="kpi-value">0</div>
       </div>
-      <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
-        <div class="text-xs font-semibold text-slate-500 uppercase tracking-wider">停止中處理器</div>
-        <div id="kpi-stopped" class="text-3xl font-bold text-slate-600 mt-2">-</div>
+      <div class="kpi-card">
+        <div class="kpi-label">Queued FlowFiles</div>
+        <div id="kpi-queued" class="kpi-value">0</div>
       </div>
-      <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
-        <div class="text-xs font-semibold text-slate-500 uppercase tracking-wider">無效處理器</div>
-        <div id="kpi-invalid" class="text-3xl font-bold text-rose-600 mt-2">-</div>
+      <div class="kpi-card">
+        <div class="kpi-label">Queued Data Size</div>
+        <div id="kpi-bytesQueued" class="kpi-value">0 B</div>
       </div>
-      <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
-        <div class="text-xs font-semibold text-slate-500 uppercase tracking-wider">佇列項目總計</div>
-        <div id="kpi-queued" class="text-3xl font-bold text-blue-600 mt-2">-</div>
+      <div class="kpi-card">
+        <div class="kpi-label">Invalid Components</div>
+        <div id="kpi-invalid" class="kpi-value">0</div>
       </div>
-    </div>
-
-    <!-- 異常分析區塊：連線瓶頸與配置錯誤 -->
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-      <!-- 瓶頸連線清單 -->
-      <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-3">
-        <div class="flex items-center justify-between">
-          <h2 class="text-base font-bold text-slate-900">連線瓶頸與積壓 (Bottlenecks)</h2>
-          <span id="badge-bottlenecks" class="px-2 py-0.5 text-xs rounded-full bg-slate-100 text-slate-600 font-medium">0</span>
-        </div>
-        <div id="list-bottlenecks" class="max-h-60 overflow-y-auto divide-y divide-slate-100 text-sm text-slate-600">
-          <div class="py-3 text-slate-400 text-center">目前無積壓或背壓瓶頸</div>
-        </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Errors</div>
+        <div id="kpi-errors" class="kpi-value">0</div>
       </div>
-
-      <!-- 無效處理器清單 -->
-      <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-3">
-        <div class="flex items-center justify-between">
-          <h2 class="text-base font-bold text-slate-900">無效處理器 (Invalid Processors)</h2>
-          <span id="badge-invalid" class="px-2 py-0.5 text-xs rounded-full bg-slate-100 text-slate-600 font-medium">0</span>
-        </div>
-        <div id="list-invalid" class="max-h-60 overflow-y-auto divide-y divide-slate-100 text-sm text-slate-600">
-          <div class="py-3 text-slate-400 text-center">所有處理器狀態皆正常</div>
-        </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Warnings</div>
+        <div id="kpi-warnings" class="kpi-value">0</div>
       </div>
     </div>
 
-    <!-- 即時監控數據 Raw JSON -->
-    <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-3">
-      <div class="flex items-center justify-between">
-        <h2 class="text-base font-bold text-slate-900">即時監控數據 (Raw JSON)</h2>
-        <button id="btn-copy-json" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1 rounded text-xs font-medium transition">
-          複製 JSON
-        </button>
+    <!-- 瓶頸連線 (Bottlenecks) -->
+    <div class="card">
+      <h2 class="section-title">🚨 積壓與背壓瓶頸連線 (Bottlenecks)</h2>
+      <div id="bottlenecksContainer">
+        <p class="empty-msg">佇列正常，無背壓或堵塞連線</p>
       </div>
-      <pre id="raw-json" class="bg-slate-900 text-slate-100 p-4 rounded-lg overflow-x-auto text-xs font-mono max-h-96 leading-relaxed">等待抓取數據中...</pre>
     </div>
 
+    <!-- 異常 Processor 清單 -->
+    <div class="card">
+      <h2 class="section-title">⚠️ 驗證失敗 / 停止中元件 (Invalid Processors)</h2>
+      <div id="invalidContainer">
+        <p class="empty-msg">所有元件運作正常 (Valid)</p>
+      </div>
+    </div>
   </div>
 
   <script>
-    const GIST_URL = "https://gist.githubusercontent.com/ltmcliao-cmyk/954552f04fc9dc1a6eb5b2d6d59cf403/raw/nifi_monitor.json";
+    const FIREBASE_URL = "https://nifi-d2de1-default-rtdb.firebaseio.com/nifi_monitor.json";
 
-    let timer = null;
-    let cachedData = null;
+    function formatBytes(bytes) {
+      if (!bytes || bytes === 0) return "0 B";
+      const k = 1024;
+      const sizes = ["B", "KB", "MB", "GB", "TB"];
+      const i = Math.floor(Math.log(bytes) / Math.log(k));
+      return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
+    }
 
-    const kpiRunning = document.getElementById("kpi-running");
-    const kpiStopped = document.getElementById("kpi-stopped");
-    const kpiInvalid = document.getElementById("kpi-invalid");
-    const kpiQueued = document.getElementById("kpi-queued");
-    const lastUpdatedEl = document.getElementById("last-updated");
-    const rawJsonEl = document.getElementById("raw-json");
+    async function refreshMonitor() {
+      try {
+        const response = await fetch(FIREBASE_URL);
+        if (!response.ok) throw new Error(HTTP ${response.status});
+        const data = await response.json();
 
-    const badgeBottlenecks = document.getElementById("badge-bottlenecks");
-    const listBottlenecks = document.getElementById("list-bottlenecks");
-    const badgeInvalid = document.getElementById("badge-invalid");
-    const listInvalid = document.getElementById("list-invalid");
+        if (!data) {
+          setConnectionStatus(false, "資料庫節點尚無資料");
+          return;
+        }
 
-    const selectInterval = document.getElementById("cfg-interval");
-    const btnSync = document.getElementById("btn-sync");
-    const btnCopy = document.getElementById("btn-copy-json");
+        renderDashboard(data);
+        setConnectionStatus(true, 最後更新: ${new Date(data.timestamp).toLocaleTimeString()});
+      } catch (err) {
+        setConnectionStatus(false, "無法連線至 Firebase");
+        console.error(err);
+      }
+    }
+
+    function setConnectionStatus(isOnline, text) {
+      const badge = document.getElementById("connStatus");
+      const label = document.getElementById("connText");
+      label.innerText = text;
+      if (isOnline) {
+        badge.className = "status-badge";
+      } else {
+        badge.className = "status-badge offline";
+      }
+    }
 
     function renderDashboard(data) {
-      if (!data) return;
-      cachedData = data;
-
-      const ctrl = data.controller_status || {};
       const kpi = data.kpi || {};
-      const bottlenecks = data.bottlenecks || [];
-      const invalidProcs = data.invalid_processors || [];
+      document.getElementById("kpi-threads").innerText = kpi.activeThreadCount || 0;
+      document.getElementById("kpi-queued").innerText = (kpi.flowFilesQueued || 0).toLocaleString();
+      document.getElementById("kpi-bytesQueued").innerText = formatBytes(kpi.bytesQueued);
 
-      // 1. 渲染頂部 4 張 KPI 卡片
-      if (kpiRunning) kpiRunning.textContent = ctrl.runningCount ?? "-";
-      if (kpiStopped) kpiStopped.textContent = ctrl.stoppedCount ?? "-";
-      if (kpiInvalid) kpiInvalid.textContent = kpi.invalidComponentCount ?? invalidProcs.length ?? 0;
-      if (kpiQueued)  kpiQueued.textContent  = (kpi.flowFilesQueued ?? 0).toLocaleString();
+      const invalidEl = document.getElementById("kpi-invalid");
+      invalidEl.innerText = kpi.invalidComponentCount || 0;
+      invalidEl.className = "kpi-value" + ((kpi.invalidComponentCount || 0) > 0 ? " alert" : "");
 
-      // 2. 渲染瓶頸清單
-      if (badgeBottlenecks) badgeBottlenecks.textContent = bottlenecks.length;
-      if (listBottlenecks) {
-        if (bottlenecks.length === 0) {
-          listBottlenecks.innerHTML = '<div class="py-3 text-slate-400 text-center">目前無積壓或背壓瓶頸</div>';
-        } else {
-          listBottlenecks.innerHTML = bottlenecks.map(item => `
-            <div class="py-2.5">
-              <div class="font-medium text-slate-800">${item.connection_name || "未命名連線"}</div>
-              <div class="text-xs text-slate-500 mt-0.5">
-                來源: ${item.source_name || item.source_id} &rarr; 目標: ${item.destination_name || item.destination_id}
-              </div>
-              <div class="text-xs font-mono text-amber-600 mt-1">
-                積壓數量: ${item.queued_count} (${item.queued_size || '0 B'}) | 使用率: ${item.percent_use_count}%
-              </div>
-            </div>
-          `).join("");
-        }
+      const errEl = document.getElementById("kpi-errors");
+      errEl.innerText = kpi.errorCount || 0;
+      errEl.className = "kpi-value" + ((kpi.errorCount || 0) > 0 ? " alert" : "");
+
+      const warnEl = document.getElementById("kpi-warnings");
+      warnEl.innerText = kpi.warningCount || 0;
+      warnEl.className = "kpi-value" + ((kpi.warningCount || 0) > 0 ? " warn" : "");
+
+      // 渲染 Bottlenecks
+      const bContainer = document.getElementById("bottlenecksContainer");
+      if (data.bottlenecks && data.bottlenecks.length > 0) {
+        let html = `<table>
+          <thead>
+            <tr>
+              <th>連線名稱</th>
+              <th>來源元件</th>
+              <th>目標元件</th>
+              <th>積壓數量</th>
+              <th>積壓體積</th>
+              <th>背壓使用率 (數量/容量)</th>
+            </tr>
+          </thead>
+          <tbody>`;
+        data.bottlenecks.forEach(b => {
+          html += `<tr>
+            <td><strong>${b.connection_name || b.connection_id}</strong></td>
+            <td>${b.source_name || "-"}</td>
+            <td>${b.destination_name || "-"}</td>
+            <td><span class="badge badge-warn">${b.queued_count}</span></td>
+            <td>${b.queued_size || "-"}</td>
+            <td>${b.percent_use_count}% / ${b.percent_use_bytes}%</td>
+          </tr>`;
+        });
+        html += </tbody></table>;
+        bContainer.innerHTML = html;
+      } else {
+        bContainer.innerHTML = <p class="empty-msg">佇列正常，無背壓或堵塞連線</p>;
       }
 
-      // 3. 渲染無效處理器清單
-      if (badgeInvalid) badgeInvalid.textContent = invalidProcs.length;
-      if (listInvalid) {
-        if (invalidProcs.length === 0) {
-          listInvalid.innerHTML = '<div class="py-3 text-slate-400 text-center">所有處理器狀態皆正常</div>';
-        } else {
-          listInvalid.innerHTML = invalidProcs.map(proc => `
-            <div class="py-2.5">
-              <div class="font-medium text-rose-700">${proc.name} <span class="text-xs text-slate-400 font-normal">(${proc.type?.split('.').pop()})</span></div>
-              <div class="text-xs text-slate-500 mt-0.5">狀態: ${proc.state} | 驗證: ${proc.validation_status}</div>
-              ${proc.validation_errors?.length ? `
-                <div class="text-xs text-rose-500 mt-1 bg-rose-50 p-1.5 rounded">
-                  ${proc.validation_errors.join("<br>")}
-                </div>
-              ` : ''}
-            </div>
-          `).join("");
-        }
-      }
-
-      // 4. 更新時間戳記
-      if (lastUpdatedEl) {
-        const now = new Date();
-        lastUpdatedEl.textContent = `最後更新：${now.toLocaleTimeString("zh-TW", { hour12: true })}`;
-      }
-
-      // 5. Raw JSON 格式化輸出
-      if (rawJsonEl) {
-        rawJsonEl.textContent = JSON.stringify(data, null, 2);
+      // 渲染 Invalid Processors
+      const pContainer = document.getElementById("invalidContainer");
+      if (data.invalid_processors && data.invalid_processors.length > 0) {
+        let html = `<table>
+          <thead>
+            <tr>
+              <th>Processor 名稱</th>
+              <th>類型</th>
+              <th>狀態</th>
+              <th>驗證錯誤內容</th>
+            </tr>
+          </thead>
+          <tbody>`;
+        data.invalid_processors.forEach(p => {
+          const errors = (p.validation_errors || []).join("<br>");
+          html += `<tr>
+            <td><strong>${p.name}</strong></td>
+            <td>${p.type.split('.').pop()}</td>
+            <td><span class="badge badge-danger">${p.validation_status}</span></td>
+            <td style="color: #fca5a5; font-size: 0.8rem;">${errors || "無具體說明"}</td>
+          </tr>`;
+        });
+        html += </tbody></table>;
+        pContainer.innerHTML = html;
+      } else {
+        pContainer.innerHTML = <p class="empty-msg">所有元件運作正常 (Valid)</p>;
       }
     }
 
-    async function fetchLatestData() {
-      try {
-        const res = await fetch(`${GIST_URL}?t=${Date.now()}`);
-        if (!res.ok) throw new Error(`HTTP 錯誤: ${res.status}`);
-        const data = await res.json();
-        renderDashboard(data);
-      } catch (err) {
-        console.error("更新失敗:", err);
-      }
-    }
-
-    function resetPolling() {
-      if (timer) clearInterval(timer);
-      const intervalSec = parseInt(selectInterval?.value || "5", 10);
-      fetchLatestData();
-      timer = setInterval(fetchLatestData, intervalSec * 1000);
-    }
-
-    // 事件監聽綁定
-    if (selectInterval) {
-      selectInterval.addEventListener("change", resetPolling);
-    }
-
-    if (btnSync) {
-      btnSync.addEventListener("click", () => {
-        fetchLatestData();
-      });
-    }
-
-    if (btnCopy) {
-      btnCopy.addEventListener("click", async () => {
-        if (!cachedData) return;
-        try {
-          await navigator.clipboard.writeText(JSON.stringify(cachedData, null, 2));
-          btnCopy.textContent = "已複製！";
-          setTimeout(() => {
-            btnCopy.textContent = "複製 JSON";
-          }, 2000);
-        } catch (e) {
-          alert("複製失敗");
-        }
-      });
-    }
-
-    // 啟動輪詢
-    resetPolling();
+    // 每 3 秒拉取一次
+    setInterval(refreshMonitor, 3000);
+    refreshMonitor();
   </script>
 </body>
 </html>
