@@ -4,229 +4,128 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>NiFi 監控儀表板</title>
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-  <style>
-    body {
-      background-color: #f4f6f9;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-    }
-    .kpi-card {
-      border-radius: 8px;
-      border: 1px solid #e2e8f0;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-      background-color: #fff;
-    }
-    .kpi-value {
-      font-size: 1.8rem;
-      font-weight: 700;
-    }
-    .kpi-label {
-      color: #64748b;
-      font-size: 0.875rem;
-      font-weight: 500;
-    }
-  </style>
+  <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body class="p-4">
-  <div class="container-fluid">
-    <!-- 頂端控制列與狀態 -->
-    <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+<body class="p-4 bg-gray-50 text-gray-800">
+  <div class="max-w-6xl mx-auto space-y-6">
+    <!-- 控制列 -->
+    <header class="flex flex-wrap items-center justify-between gap-4 p-4 bg-white rounded-lg shadow-sm border border-gray-200">
       <div>
-        <h2 class="h4 mb-1">Apache NiFi 叢集監控儀表板</h2>
-        <div class="text-muted small">
-          API 基礎路徑: <span id="nifi-base-url">http://127.0.0.1:8080/nifi-api</span> |
-          最後更新時間: <span id="last-updated" class="fw-semibold">--</span>
-        </div>
+        <h1 class="text-xl font-bold text-gray-900">NiFi 監控狀態</h1>
+        <p id="status-time" class="text-xs text-gray-500 mt-1">最後更新：尚未更新</p>
       </div>
-      <div class="d-flex align-items-center gap-2">
-        <label for="cfg-interval" class="form-label mb-0 text-nowrap small text-muted">自動重整:</label>
-        <select id="cfg-interval" class="form-select form-select-sm" style="width: auto;">
+
+      <div class="flex items-center gap-3">
+        <label for="cfg-interval" class="text-sm text-gray-600">更新頻率：</label>
+        <select id="cfg-interval" class="border border-gray-300 rounded px-2 py-1 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
           <option value="3000">3 秒</option>
           <option value="5000" selected>5 秒</option>
           <option value="10000">10 秒</option>
           <option value="30000">30 秒</option>
         </select>
-        <button id="btn-manual-sync" class="btn btn-primary btn-sm">立即同步</button>
+        
+        <button id="btn-manual-sync" class="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded transition-colors">
+          手動同步
+        </button>
       </div>
-    </div>
+    </header>
 
-    <!-- KPI 資訊卡 -->
-    <div class="row g-3 mb-4">
-      <div class="col-6 col-md-4 col-lg-2">
-        <div class="p-3 kpi-card">
-          <div class="kpi-label">Active Threads</div>
-          <div class="kpi-value text-primary" id="kpi-active-threads">0</div>
-        </div>
-      </div>
-      <div class="col-6 col-md-4 col-lg-2">
-        <div class="p-3 kpi-card">
-          <div class="kpi-label">Queued Flows</div>
-          <div class="kpi-value text-warning" id="kpi-flowfiles-queued">0</div>
-        </div>
-      </div>
-      <div class="col-6 col-md-4 col-lg-2">
-        <div class="p-3 kpi-card">
-          <div class="kpi-label">Queued Data</div>
-          <div class="kpi-value text-secondary" id="kpi-bytes-queued">0 / 0 bytes</div>
-        </div>
-      </div>
-      <div class="col-6 col-md-4 col-lg-2">
-        <div class="p-3 kpi-card">
-          <div class="kpi-label">Running Processors</div>
-          <div class="kpi-value text-success" id="kpi-running-count">0</div>
-        </div>
-      </div>
-      <div class="col-6 col-md-4 col-lg-2">
-        <div class="p-3 kpi-card">
-          <div class="kpi-label">Stopped Processors</div>
-          <div class="kpi-value text-muted" id="kpi-stopped-count">0</div>
-        </div>
-      </div>
-      <div class="col-6 col-md-4 col-lg-2">
-        <div class="p-3 kpi-card">
-          <div class="kpi-label">Invalid Components</div>
-          <div class="kpi-value text-danger" id="kpi-invalid-count">0</div>
-        </div>
-      </div>
-    </div>
+    <!-- 狀態連線提示 -->
+    <div id="status-indicator" class="hidden p-3 rounded-lg text-sm"></div>
 
-    <div class="row g-3">
-      <!-- 處理群組表格 -->
-      <div class="col-lg-8">
-        <div class="card h-100 shadow-sm border-0">
-          <div class="card-header bg-white py-3">
-            <h5 class="card-title mb-0 h6">Process Groups Summary</h5>
-          </div>
-          <div class="table-responsive">
-            <table class="table table-hover align-middle mb-0">
-              <thead class="table-light">
-                <tr>
-                  <th>Process Group ID</th>
-                  <th>Processor Count</th>
-                  <th>Connection Count</th>
-                </tr>
-              </thead>
-              <tbody id="pg-summary-tbody">
-                <tr>
-                  <td colspan="3" class="text-center text-muted py-3">讀取資料中...</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
+    <!-- KPI 卡片 -->
+    <section class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+      <div class="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
+        <p class="text-xs text-gray-500">執行中處理器</p>
+        <p id="kpi-running" class="text-2xl font-bold text-green-600 mt-1">-</p>
       </div>
+      <div class="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
+        <p class="text-xs text-gray-500">停止中處理器</p>
+        <p id="kpi-stopped" class="text-2xl font-bold text-gray-600 mt-1">-</p>
+      </div>
+      <div class="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
+        <p class="text-xs text-gray-500">無效處理器</p>
+        <p id="kpi-invalid" class="text-2xl font-bold text-red-600 mt-1">-</p>
+      </div>
+      <div class="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
+        <p class="text-xs text-gray-500">佇列項目總計</p>
+        <p id="kpi-queued" class="text-2xl font-bold text-blue-600 mt-1">-</p>
+      </div>
+    </section>
 
-      <!-- 公告與告警 -->
-      <div class="col-lg-4">
-        <div class="card h-100 shadow-sm border-0">
-          <div class="card-header bg-white py-3">
-            <h5 class="card-title mb-0 h6">System Bulletins & 告警</h5>
-          </div>
-          <div class="card-body">
-            <div id="bulletins-container">
-              <div class="alert alert-info mb-0">目前無警告或錯誤訊息</div>
-            </div>
-          </div>
-        </div>
+    <!-- 原始資料預覽 -->
+    <section class="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="text-sm font-semibold text-gray-700">即時監控數據 (Raw JSON)</h2>
+        <button id="btn-copy-json" class="text-xs px-2 py-1 border border-gray-300 rounded hover:bg-gray-100 text-gray-600 transition-colors">
+          複製 JSON
+        </button>
       </div>
-    </div>
+      <pre id="json-viewer" class="bg-gray-900 text-gray-100 p-4 rounded text-xs overflow-x-auto max-h-96">載入中...</pre>
+    </section>
   </div>
 
   <script>
+    // 正確的 Gist Raw 網址（檔名空白轉碼為 %20）
+    const GIST_URL = "https://gist.githubusercontent.com/ltmcliao-cmyk/954552f04fc9dc1a6eb5b2d6d59cf403/raw/nifi%20monitor.json";
+    
     let timerId = null;
+    let cachedData = null;
 
-    // 1. 抓取資料
+    // 更新畫面指標
+    function renderDashboard(data) {
+      cachedData = data;
+      
+      const timeEl = document.getElementById("status-time");
+      if (timeEl) timeEl.textContent = `最後更新：${new Date().toLocaleTimeString()}`;
+
+      // 嘗試解析與映射常見 NiFi 狀態欄位
+      const runningCount = data?.runningCount ?? data?.aggregateSnapshot?.runningCount ?? "-";
+      const stoppedCount = data?.stoppedCount ?? data?.aggregateSnapshot?.stoppedCount ?? "-";
+      const invalidCount = data?.invalidCount ?? data?.aggregateSnapshot?.invalidCount ?? "-";
+      const queuedCount = data?.queuedCount ?? data?.aggregateSnapshot?.flowFilesQueued ?? "-";
+
+      document.getElementById("kpi-running").textContent = runningCount;
+      document.getElementById("kpi-stopped").textContent = stoppedCount;
+      document.getElementById("kpi-invalid").textContent = invalidCount;
+      document.getElementById("kpi-queued").textContent = queuedCount;
+
+      const viewer = document.getElementById("json-viewer");
+      if (viewer) {
+        viewer.textContent = JSON.stringify(data, null, 2);
+      }
+
+      // 隱藏錯誤提示
+      const statusEl = document.getElementById("status-indicator");
+      if (statusEl) {
+        statusEl.className = "hidden";
+      }
+    }
+
+    // 抓取遠端資料
     async function fetchLatestData() {
-      // Gist raw 網址：空格請保持 %20 編碼以避免 404
-      const baseUrl = "https://gist.githubusercontent.com/ltmcliao/954552f/raw/nifi%20monitor.json";
-      const fetchUrl = `${baseUrl}?t=${Date.now()}`;
-
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000);
-
+      const statusEl = document.getElementById("status-indicator");
       try {
-        const response = await fetch(fetchUrl, {
-          signal: controller.signal,
+        const response = await fetch(`${GIST_URL}?t=${Date.now()}`, {
           cache: "no-store"
         });
 
-        clearTimeout(timeoutId);
-
         if (!response.ok) {
-          throw new Error(`HTTP 錯誤: ${response.status} (${response.statusText})`);
+          throw new Error(`HTTP ${response.status} (${response.statusText})`);
         }
 
         const data = await response.json();
-        renderUI(data);
-      } catch (error) {
-        clearTimeout(timeoutId);
-        if (error.name === "AbortError") {
-          console.error("更新失敗: HTTP 連線逾時", error);
-        } else {
-          console.error("更新失敗:", error.message);
+        renderDashboard(data);
+      } catch (err) {
+        console.error("更新失敗:", err);
+        if (statusEl) {
+          statusEl.textContent = `連線異常：${err.message}`;
+          statusEl.className = "block p-3 rounded-lg text-sm bg-red-50 text-red-700 border border-red-200";
         }
       }
     }
 
-    // 2. 渲染 UI
-    function renderUI(data) {
-      if (!data) return;
-
-      const setVal = (id, val) => {
-        const el = document.getElementById(id);
-        if (el) el.textContent = (val !== undefined && val !== null) ? val : "--";
-      };
-
-      // 基礎設定與時間戳
-      if (data.nifi_base_url) setVal("nifi-base-url", data.nifi_base_url);
-      if (data.timestamp) {
-        setVal("last-updated", new Date(data.timestamp).toLocaleString("zh-TW"));
-      }
-
-      // 指標計算 (Controller Status 與 KPI 聚合)
-      const ctrl = data.controller_status || {};
-      const kpi = data.kpi || {};
-
-      setVal("kpi-active-threads", ctrl.activeThreadCount ?? kpi.activeThreadCount);
-      setVal("kpi-flowfiles-queued", ctrl.flowFilesQueued ?? kpi.flowFilesQueued);
-      setVal("kpi-bytes-queued", ctrl.queued || `${ctrl.bytesQueued ?? kpi.bytesQueued} bytes`);
-      setVal("kpi-running-count", ctrl.runningCount);
-      setVal("kpi-stopped-count", ctrl.stoppedCount);
-      setVal("kpi-invalid-count", ctrl.invalidCount ?? kpi.invalidComponentCount);
-
-      // Bulletins
-      const bulletinsContainer = document.getElementById("bulletins-container");
-      if (bulletinsContainer) {
-        const list = data.bulletins || [];
-        if (list.length === 0) {
-          bulletinsContainer.innerHTML = '<div class="alert alert-info mb-0">目前無警告或錯誤訊息</div>';
-        } else {
-          bulletinsContainer.innerHTML = list.map(item => `
-            <div class="alert alert-warning mb-2">
-              ${typeof item === "object" ? (item.message || JSON.stringify(item)) : item}
-            </div>
-          `).join("");
-        }
-      }
-
-      // Process Groups 表格
-      const pgTableBody = document.getElementById("pg-summary-tbody");
-      if (pgTableBody && Array.isArray(data.process_groups_summary)) {
-        if (data.process_groups_summary.length === 0) {
-          pgTableBody.innerHTML = '<tr><td colspan="3" class="text-center text-muted py-3">無 Process Group 資訊</td></tr>';
-        } else {
-          pgTableBody.innerHTML = data.process_groups_summary.map(pg => `
-            <tr>
-              <td><code>${pg.process_group_id}</code></td>
-              <td>${pg.processor_count}</td>
-              <td>${pg.connection_count}</td>
-            </tr>
-          `).join("");
-        }
-      }
-    }
-
-    // 3. 定時輪詢控制器
+    // 重設輪詢計時器
     function resetPolling() {
       if (timerId) clearInterval(timerId);
 
@@ -237,12 +136,26 @@
       timerId = setInterval(fetchLatestData, interval);
     }
 
-    // 4. 事件綁定
+    // 事件綁定
     const btnSync = document.getElementById("btn-manual-sync");
     if (btnSync) btnSync.addEventListener("click", fetchLatestData);
 
     const selectInterval = document.getElementById("cfg-interval");
     if (selectInterval) selectInterval.addEventListener("change", resetPolling);
+
+    const btnCopy = document.getElementById("btn-copy-json");
+    if (btnCopy) {
+      btnCopy.addEventListener("click", async () => {
+        if (!cachedData) return;
+        try {
+          await navigator.clipboard.writeText(JSON.stringify(cachedData, null, 2));
+          btnCopy.textContent = "已複製！";
+          setTimeout(() => { btnCopy.textContent = "複製 JSON"; }, 2000);
+        } catch (e) {
+          alert("複製失敗");
+        }
+      });
+    }
 
     // 首次啟動
     resetPolling();
