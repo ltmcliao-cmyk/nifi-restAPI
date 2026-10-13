@@ -162,7 +162,7 @@
 
     .pg-name {
       font-weight: 600;
-      font-size: 14px;
+      font-size: 13px;
       color: #ffffff;
       word-break: break-all;
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
@@ -326,9 +326,9 @@
 <body>
 
   <div class="header">
-    <h2 style="margin: 0;">⚡ NiFi 流程即時監控</h2>
+    <h2 style="margin: 0;">⚡ NiFi 流程快照監控</h2>
     <div>
-      <span id="connectionStatus" class="status-badge status-offline">連線檢查中...</span>
+      <span id="connectionStatus" class="status-badge status-offline">快照讀取中...</span>
       <span id="lastUpdated" style="font-size: 13px; color: var(--text-muted); margin-left: 12px;"></span>
     </div>
   </div>
@@ -458,11 +458,10 @@
       if (elThreads) elThreads.textContent = threadCount.toLocaleString();
     }
 
-    // 解析 Process Group 快照（向下相容 process_groups_summary、process_groups 與 aggregateSnapshot）
+    // 解析 Process Group 快照
     function parseProcessGroups(data) {
       if (!data) return [];
 
-      // 相容 Firebase 最新格式: process_groups_summary
       if (Array.isArray(data.process_groups_summary)) {
         return data.process_groups_summary.map(item => ({
           id: item.process_group_id || item.id || "-",
@@ -480,41 +479,6 @@
       if (Array.isArray(data.processGroups)) return data.processGroups;
       if (Array.isArray(data.pgs)) return data.pgs;
 
-      const rootSnap = data.aggregateSnapshot ||
-                       data.processGroupStatus?.aggregateSnapshot ||
-                       (data.status && data.status.aggregateSnapshot);
-
-      if (rootSnap) {
-        if (Array.isArray(rootSnap.processGroupStatusSnapshots) && rootSnap.processGroupStatusSnapshots.length > 0) {
-          return rootSnap.processGroupStatusSnapshots.map(item => {
-            const snap = item.processGroupStatusSnapshot || item;
-            return {
-              id: snap.id,
-              name: snap.name || "未命名流程群組",
-              processorCount: Number(snap.processorCount || 0),
-              connectionCount: Number(snap.connectionCount || 0),
-              activeThreadCount: Number(snap.activeThreadCount || 0),
-              queuedCount: Number(snap.flowFilesQueued || snap.queuedCount || 0),
-              bytesQueued: snap.bytesQueued || "0 B",
-              flowFilesIn: Number(snap.flowFilesIn || snap.bytesIn || 0),
-              flowFilesOut: Number(snap.flowFilesOut || snap.bytesOut || 0)
-            };
-          });
-        }
-
-        return [{
-          id: rootSnap.id || "root",
-          name: rootSnap.name || "Root Process Group",
-          processorCount: Number(rootSnap.processorCount || 0),
-          connectionCount: Number(rootSnap.connectionCount || 0),
-          activeThreadCount: Number(rootSnap.activeThreadCount || 0),
-          queuedCount: Number(rootSnap.flowFilesQueued || rootSnap.queuedCount || 0),
-          bytesQueued: rootSnap.bytesQueued || "0 B",
-          flowFilesIn: Number(rootSnap.flowFilesIn || 0),
-          flowFilesOut: Number(rootSnap.flowFilesOut || 0)
-        }];
-      }
-
       return [];
     }
 
@@ -528,7 +492,8 @@
       }
 
       container.innerHTML = pgs.map(pg => {
-        const isFlowing = (pg.activeThreadCount > 0) || (pg.flowFilesIn > 0) || (pg.flowFilesOut > 0) || (pg.processorCount > 0);
+        // 嚴格依據實際活動指標判定，不拿 processorCount 充當活動依據
+        const isFlowing = (pg.activeThreadCount > 0) || (pg.flowFilesIn > 0) || (pg.flowFilesOut > 0);
         const hasBacklog = (pg.queuedCount > 0);
 
         return `
@@ -537,15 +502,15 @@
               <span class="pg-name" title="${pg.id}">${pg.name}</span>
               <span class="pg-state-pill ${isFlowing ? 'active' : ''}">
                 <span class="state-dot"></span>
-                ${isFlowing ? '運行中 (Active)' : '閒置 (Idle)'}
+                ${isFlowing ? '流動中 (Flowing)' : '靜止 (Idle)'}
               </span>
             </div>
 
             <!-- FlowFile 動態流動軌道 -->
             <div class="stream-wrapper">
               <div class="stream-meta">
-                <span>連線狀態</span>
-                <span>${pg.connectionCount > 0 ? `${pg.connectionCount} 條連線` : '無連線'}</span>
+                <span>佇列傳輸狀態</span>
+                <span>${isFlowing ? 'FlowFile 傳輸中' : '無流量'}</span>
               </div>
               <div class="stream-track">
                 <div class="stream-flow ${isFlowing ? 'flowing' : ''}"></div>
@@ -555,13 +520,13 @@
             <div class="pg-metrics-grid">
               <div class="metric-cell">
                 <div class="metric-name">處理器數 (Processors)</div>
-                <div class="metric-data ${pg.processorCount > 0 ? 'highlight' : ''}">
+                <div class="metric-data">
                   ${pg.processorCount.toLocaleString()}
                 </div>
               </div>
 
               <div class="metric-cell">
-                <div class="metric-name">連線數 (Connections)</div>
+                <div class="metric-name">畫布連線數 (Connections)</div>
                 <div class="metric-data">
                   ${pg.connectionCount.toLocaleString()}
                 </div>
@@ -575,7 +540,7 @@
               </div>
 
               <div class="metric-cell">
-                <div class="metric-name">執行緒 (Threads)</div>
+                <div class="metric-name">活躍執行緒 (Threads)</div>
                 <div class="metric-data ${pg.activeThreadCount > 0 ? 'highlight' : ''}">
                   ${pg.activeThreadCount}
                 </div>
@@ -656,7 +621,7 @@
         const data = await res.json();
         latestData = data;
 
-        setConnectionStatus(true, "連線正常");
+        setConnectionStatus(true, "快照同步正常");
         document.getElementById("lastUpdated").textContent = `最後同步：${new Date().toLocaleTimeString()}`;
 
         renderOverviewKPI(data);
@@ -665,8 +630,8 @@
         renderInvalidProcessors(data);
         renderBulletins(data);
       } catch (err) {
-        console.error("讀取 Firebase 資料失敗：", err);
-        setConnectionStatus(false, "連線中斷 / 讀取失敗");
+        console.error("讀取 Firebase 快照失敗：", err);
+        setConnectionStatus(false, "快照連線中斷 / 讀取失敗");
       }
     }
 
