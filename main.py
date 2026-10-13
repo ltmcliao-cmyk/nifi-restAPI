@@ -1,12 +1,21 @@
-""" main 模組 - 系統調度器 """
+"""
+main 模組 - 系統調度器
+職責：
+1. 使用 nipyapi 初始化並啟動 NiFi Process Groups
+2. 啟動完成後，直接調用 monitor_publisher 執行 API 端點輪詢與 Firebase 推送
+"""
+
 import os
 import nipyapi
-from pgs import local_2_SQL
-from pgs import flowfile_generator  # 【新增】：導入新的 FlowFile 產生器模組
+from pgs import local_2_SQL, flowfile_generator
 import routes
 
+# 匯入監控與推送模組
+import monitor_publisher
+
+
 def main():
-    # 1. 連線設定
+    # 1. 連線設定與環境變數對齊 (修復 nipyapi host 配置)
     nifi_host = os.getenv('NIFI_HOST', 'http://localhost:8080')
     nipyapi.config.nifi_config.host = f"{nifi_host.rstrip('/')}/nifi-api"
 
@@ -35,20 +44,28 @@ def main():
         file_filter=".*"
     )
 
-    # 【新增】：6. 建立 Continuous FlowFile Generator 拓樸 (即時監控測試用)
+    # 6. 建立 Continuous FlowFile Generator 拓樸 (即時監控測試用)
     generator_pg = flowfile_generator.create_flowfile_generator_pg(
         parent_pg=root_pg
     )
 
-    # 7. 路由保留介面
-    routes.build_inter_pg_routes()
+    # 7. 跨 PG 路由設定 (修復路由方法呼叫，傳入剛剛建立的兩個 PG)
+    if hasattr(routes, 'setup_inter_pg_routes'):
+        routes.setup_inter_pg_routes(local_pg=local_pg, generator_pg=generator_pg)
+    elif hasattr(routes, 'create_inter_pg_routes'):
+        routes.create_inter_pg_routes(local_pg=local_pg, generator_pg=generator_pg)
 
-    # 8. 一鍵啟動全拓樸 (同時調度 local_pg 與 generator_pg)
+    # 8. 一鍵啟動全拓樸 (修復排程調度目標 PG)
     nipyapi.canvas.schedule_process_group(local_pg.id, scheduled=True)
-    nipyapi.canvas.schedule_process_group(generator_pg.id, scheduled=True)  # 【新增】：啟動測試資料產生器 Process Group
+    nipyapi.canvas.schedule_process_group(generator_pg.id, scheduled=True)
 
     print(f"[OK] Successfully initialized and started Process Group '{local_pg.component.name}' (ID: {local_pg.id})")
     print(f"[OK] Successfully initialized and started Process Group '{generator_pg.component.name}' (ID: {generator_pg.id})")
+
+    # 9. 拓樸建置完畢，交接給監控守護行程執行主迴圈
+    print("[INFO] Handing over to NiFi Monitor Publisher Daemon...")
+    monitor_publisher.main()
+
 
 if __name__ == '__main__':
     main()

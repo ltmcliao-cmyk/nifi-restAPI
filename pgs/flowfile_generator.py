@@ -1,16 +1,16 @@
-# pgs 資料夾下的 flowfile_generator 模組
+# pgs/flowfile_generator.py
 import time
 import nipyapi
 
-# 定義目標 Process Group 與處理器名稱
 GENERATOR_PG_NAME = "FlowFile_Generator"
 GENERATE_PROC_NAME = "Generate Continuous Test Data"
+SINK_PROC_NAME = "Queue Sink (Stopped)"
 
 def log(msg, level="INFO"):
     print(f"[DEPLOY-LOG {time.strftime('%H:%M:%S')}] [{level}] {msg}", flush=True)
 
 def create_flowfile_generator_pg(parent_pg=None, **kwargs):
-    """建立並配置持續產生 FlowFile 的測試用 Process Group"""
+    """建立並配置持續產生 FlowFile 並堆積在 Queue 的測試用 Process Group"""
     log("=== [START] FlowFile Generator 流程圖配置部署 ===", "STEP")
     
     if parent_pg is None:
@@ -30,10 +30,10 @@ def create_flowfile_generator_pg(parent_pg=None, **kwargs):
         )
     log(f"鎖定目標 Process Group: {gen_pg.component.name} (UUID: {gen_pg.id})", "OK")
 
-    # 2. 檢查或建立 GenerateFlowFile 處理器
     procs = nipyapi.canvas.list_all_processors(gen_pg.id)
-    gen_proc = next((p for p in procs if p.component.name == GENERATE_PROC_NAME), None)
 
+    # 2. 建立或取得 GenerateFlowFile 處理器
+    gen_proc = next((p for p in procs if p.component.name == GENERATE_PROC_NAME), None)
     if not gen_proc:
         log("建立 GenerateFlowFile 處理器...", "INFO")
         proc_type = nipyapi.canvas.get_processor_type("GenerateFlowFile")
@@ -47,7 +47,42 @@ def create_flowfile_generator_pg(parent_pg=None, **kwargs):
             name=GENERATE_PROC_NAME
         )
 
-    # 3. 配置 GenerateFlowFile 屬性 (每秒自動產生 1 筆測試 FlowFile)
+    # 3. 建立或取得下游 Sink 處理器（故意保持 STOPPED 讓 Queue 積壓）
+    sink_proc = next((p for p in procs if p.component.name == SINK_PROC_NAME), None)
+    if not sink_proc:
+        log("建立下游 Sink 處理器（用於累積 Queue）...", "INFO")
+        proc_type = nipyapi.canvas.get_processor_type("LogAttribute")
+        if isinstance(proc_type, list):
+            proc_type = proc_type[0]
+            
+        sink_proc = nipyapi.canvas.create_processor(
+            parent_pg=gen_pg,
+            processor=proc_type,
+            location=(100, 300),
+            name=SINK_PROC_NAME
+        )
+        # 標記 success 為 auto-terminate 確保驗證合法 (VALID)
+        nipyapi.canvas.update_processor(
+            sink_proc,
+            nipyapi.nifi.ProcessorConfigDTO(auto_terminated_relationships=["success"])
+        )
+
+    # 4. 建立 Connection（如果尚未連線）
+    conns = nipyapi.canvas.list_all_connections(gen_pg.id)
+    target_conn = next(
+        (c for c in conns if c.source_id == gen_proc.id and c.destination_id == sink_proc.id),
+        None
+    )
+    if not target_conn:
+        log("建立 GenerateFlowFile -> Sink 連線佇列...", "INFO")
+        nipyapi.canvas.create_connection(
+            source=gen_proc,
+            target=sink_proc,
+            relationships=["success"],
+            name="Test Pressure Queue"
+        )
+
+    # 5. 配置 GenerateFlowFile（移除 auto-terminate，將資料導向連線佇列）
     test_payload = '{"status": "monitoring", "timestamp": "${now():toNumber()}"}'
     config_props = {
         "File Size": "1B",
@@ -61,10 +96,12 @@ def create_flowfile_generator_pg(parent_pg=None, **kwargs):
         nipyapi.nifi.ProcessorConfigDTO(
             properties=config_props,
             scheduling_period="1 sec",
-            auto_terminated_relationships=["success"]
+            auto_terminated_relationships=[]  # 走 success 連線，不直接銷毀
         )
     )
-    log(f"GenerateFlowFile 處理器配置完成 (UUID: {gen_proc.id})", "OK")
 
-    log("=== [FINISH] FlowFile Generator 部署完成 ===", "OK")
+    # 啟動產生器（下游維持停止）
+    nipyapi.canvas.schedule_processor(gen_proc, True)
+
+    log("=== [FINISH] FlowFile Generator 部署完成（佇列開始積壓） ===", "OK")
     return gen_pg
