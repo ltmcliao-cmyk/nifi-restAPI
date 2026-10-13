@@ -3,36 +3,32 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Apache NiFi 即時監控儀表板</title>
+  <title>NiFi 監控儀表板</title>
   <style>
     :root {
-      --bg: #0f172a;
+      --bg-color: #0f172a;
       --card-bg: #1e293b;
-      --border: #334155;
-      --text: #f8fafc;
+      --text-main: #f8fafc;
       --text-muted: #94a3b8;
-      --success: #10b981;
-      --warning: #f59e0b;
+      --accent: #38bdf8;
+      --warn: #f59e0b;
       --danger: #ef4444;
-      --primary: #38bdf8;
+      --success: #10b981;
+      --border: #334155;
     }
 
     * {
       box-sizing: border-box;
       margin: 0;
       padding: 0;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     }
 
     body {
-      background-color: var(--bg);
-      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      background-color: var(--bg-color);
+      color: var(--text-main);
       padding: 24px;
-    }
-
-    .container {
-      max-width: 1300px;
-      margin: 0 auto;
+      line-height: 1.5;
     }
 
     header {
@@ -45,31 +41,27 @@
     }
 
     .status-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
       font-size: 0.9rem;
-      padding: 6px 14px;
+      padding: 6px 12px;
       border-radius: 9999px;
-      background: #064e3b;
-      color: #6ee7b7;
+      background: #334155;
     }
 
-    .status-badge.offline {
-      background: #7f1d1d;
-      color: #fca5a5;
+    .status-online {
+      background-color: rgba(16, 185, 129, 0.2);
+      color: var(--success);
+      border: 1px solid var(--success);
     }
 
-    .dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background-color: currentColor;
+    .status-offline {
+      background-color: rgba(239, 68, 68, 0.2);
+      color: var(--danger);
+      border: 1px solid var(--danger);
     }
 
     .kpi-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
       gap: 16px;
       margin-bottom: 24px;
     }
@@ -77,44 +69,33 @@
     .kpi-card {
       background: var(--card-bg);
       border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 18px;
+      border-radius: 8px;
+      padding: 16px;
     }
 
-    .kpi-label {
-      font-size: 0.8rem;
+    .kpi-title {
+      font-size: 0.85rem;
       color: var(--text-muted);
-      margin-bottom: 6px;
+      margin-bottom: 8px;
     }
 
     .kpi-value {
-      font-size: 1.6rem;
+      font-size: 1.75rem;
       font-weight: 700;
-      color: var(--primary);
     }
 
-    .kpi-value.alert {
-      color: var(--danger);
-    }
-
-    .kpi-value.warn {
-      color: var(--warning);
-    }
-
-    .section-title {
-      font-size: 1.1rem;
-      margin-bottom: 12px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-
-    .card {
+    .section-card {
       background: var(--card-bg);
       border: 1px solid var(--border);
-      border-radius: 10px;
+      border-radius: 8px;
       padding: 20px;
       margin-bottom: 24px;
+    }
+
+    .section-card h2 {
+      font-size: 1.2rem;
+      margin-bottom: 16px;
+      color: var(--accent);
     }
 
     table {
@@ -124,151 +105,113 @@
       font-size: 0.9rem;
     }
 
-    th {
-      color: var(--text-muted);
-      padding: 10px;
+    th, td {
+      padding: 12px;
       border-bottom: 1px solid var(--border);
     }
 
-    td {
-      padding: 10px;
-      border-bottom: 1px solid var(--border);
-      vertical-align: top;
+    th {
+      color: var(--text-muted);
+      font-weight: 600;
+      background-color: rgba(0, 0, 0, 0.2);
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 0.8rem;
+      font-weight: 600;
+    }
+
+    .badge-warn {
+      background-color: rgba(245, 158, 11, 0.2);
+      color: var(--warn);
+    }
+
+    .badge-danger {
+      background-color: rgba(239, 68, 68, 0.2);
+      color: var(--danger);
     }
 
     .empty-msg {
       color: var(--text-muted);
-      font-size: 0.9rem;
       text-align: center;
-      padding: 16px 0;
-    }
-
-    .badge {
-      padding: 2px 8px;
-      border-radius: 4px;
-      font-size: 0.75rem;
-      font-weight: 600;
-      display: inline-block;
-    }
-
-    .badge-danger {
-      background: rgba(239, 68, 68, 0.2);
-      color: #f87171;
-      border: 1px solid #ef4444;
-    }
-
-    .badge-warn {
-      background: rgba(245, 158, 11, 0.2);
-      color: #fbbf24;
-      border: 1px solid #f59e0b;
+      padding: 24px 0;
+      font-size: 0.95rem;
     }
   </style>
 </head>
 <body>
-  <div class="container">
-    <header>
-      <div>
-        <h1>Apache NiFi 叢集即時監控</h1>
-        <p style="color: var(--text-muted); font-size: 0.85rem; margin-top: 4px;">後端通道：Firebase Realtime Database</p>
-      </div>
-      <div id="connStatus" class="status-badge offline">
-        <span class="dot"></span>
-        <span id="connText">連線中...</span>
-      </div>
-    </header>
 
-    <!-- KPI 總覽 -->
-    <div class="kpi-grid">
-      <div class="kpi-card">
-        <div class="kpi-label">Active Threads</div>
-        <div id="kpi-threads" class="kpi-value">0</div>
-      </div>
-      <div class="kpi-card">
-        <div class="kpi-label">Queued FlowFiles</div>
-        <div id="kpi-queued" class="kpi-value">0</div>
-      </div>
-      <div class="kpi-card">
-        <div class="kpi-label">Queued Data Size</div>
-        <div id="kpi-bytesQueued" class="kpi-value">0 B</div>
-      </div>
-      <div class="kpi-card">
-        <div class="kpi-label">Invalid Components</div>
-        <div id="kpi-invalid" class="kpi-value">0</div>
-      </div>
-      <div class="kpi-card">
-        <div class="kpi-label">Errors</div>
-        <div id="kpi-errors" class="kpi-value">0</div>
-      </div>
-      <div class="kpi-card">
-        <div class="kpi-label">Warnings</div>
-        <div id="kpi-warnings" class="kpi-value">0</div>
-      </div>
-    </div>
+  <header>
+    <h1>NiFi 監控儀表板</h1>
+    <div id="connectionStatus" class="status-badge status-offline">連線檢查中...</div>
+  </header>
 
-    <!-- 佇列瓶頸 -->
-    <div class="card">
-      <h2 class="section-title">🚨 積壓與背壓瓶頸連線 (Bottlenecks)</h2>
-      <div id="bottlenecksContainer">
-        <p class="empty-msg">佇列正常，無背壓或堵塞連線</p>
-      </div>
+  <!-- KPI 指標區塊 -->
+  <section class="kpi-grid">
+    <div class="kpi-card">
+      <div class="kpi-title">總連線數 (Connections)</div>
+      <div id="kpiConnections" class="kpi-value">-</div>
     </div>
+    <div class="kpi-card">
+      <div class="kpi-title">目前堆積量 (Queued FlowFiles)</div>
+      <div id="kpiQueuedCount" class="kpi-value">-</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-title">堵塞連線數 (Bottlenecks)</div>
+      <div id="kpiBottlenecks" class="kpi-value">-</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-title">無效元件數 (Invalid Processors)</div>
+      <div id="kpiInvalidProcessors" class="kpi-value">-</div>
+    </div>
+  </section>
 
-    <!-- 異常 Processor 清單 -->
-    <div class="card">
-      <h2 class="section-title">⚠️ 驗證失敗 / 停止中元件 (Invalid Processors)</h2>
-      <div id="invalidContainer">
-        <p class="empty-msg">所有元件運作正常 (Valid)</p>
-      </div>
+  <!-- 瓶頸連線清單 -->
+  <section class="section-card">
+    <h2>佇列背壓 / 堵塞連線清單</h2>
+    <div id="bottleneckContainer">
+      <p class="empty-msg">載入中...</p>
     </div>
-  </div>
+  </section>
+
+  <!-- 異常元件清單 -->
+  <section class="section-card">
+    <h2>無效處理器 (Invalid Processors) 清單</h2>
+    <div id="invalidContainer">
+      <p class="empty-msg">載入中...</p>
+    </div>
+  </section>
 
   <script>
-    const FIREBASE_URL = "https://nifi-d2de1-default-rtdb.firebaseio.com/nifi_monitor.json";
+    // 請填入您的 API 端點或 GitHub Gist Raw 連結
+    const GIST_URL = "data.json"; 
 
-    function formatBytes(bytes) {
-      if (!bytes || bytes === 0) return "0 B";
-      const k = 1024;
-      const sizes = ["B", "KB", "MB", "GB", "TB"];
-      const i = Math.floor(Math.log(bytes) / Math.log(k));
-      return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
-    }
-
-    function setConnectionStatus(isOnline, text) {
-      const badge = document.getElementById("connStatus");
-      const label = document.getElementById("connText");
-      label.innerText = text;
-      if (isOnline) {
-        badge.className = "status-badge";
-      } else {
-        badge.className = "status-badge offline";
-      }
+    function setConnectionStatus(isOnline, message) {
+      const el = document.getElementById("connectionStatus");
+      if (!el) return;
+      el.className = `status-badge ${isOnline ? "status-online" : "status-offline"}`;
+      el.textContent = message;
     }
 
     function renderDashboard(data) {
-      const kpi = data.kpi || {};
-      document.getElementById("kpi-threads").innerText = kpi.activeThreadCount || 0;
-      document.getElementById("kpi-queued").innerText = (kpi.flowFilesQueued || 0).toLocaleString();
-      document.getElementById("kpi-bytesQueued").innerText = formatBytes(kpi.bytesQueued);
+      if (!data) return;
 
-      const invalidEl = document.getElementById("kpi-invalid");
-      invalidEl.innerText = kpi.invalidComponentCount || 0;
-      invalidEl.className = "kpi-value" + ((kpi.invalidComponentCount || 0) > 0 ? " alert" : "");
+      // 1. 渲染 KPI 區塊
+      document.getElementById("kpiConnections").textContent = data.total_connections ?? "-";
+      document.getElementById("kpiQueuedCount").textContent = data.total_queued_count ?? "-";
+      document.getElementById("kpiBottlenecks").textContent = (data.bottlenecks || []).length;
+      document.getElementById("kpiInvalidProcessors").textContent = (data.invalid_processors || []).length;
 
-      const errEl = document.getElementById("kpi-errors");
-      errEl.innerText = kpi.errorCount || 0;
-      errEl.className = "kpi-value" + ((kpi.errorCount || 0) > 0 ? " alert" : "");
-
-      const warnEl = document.getElementById("kpi-warnings");
-      warnEl.innerText = kpi.warningCount || 0;
-      warnEl.className = "kpi-value" + ((kpi.warningCount || 0) > 0 ? " warn" : "");
-
-      // 渲染 Bottlenecks 表格
-      const bContainer = document.getElementById("bottlenecksContainer");
+      // 2. 渲染 Bottlenecks 表格
+      const bContainer = document.getElementById("bottleneckContainer");
       if (data.bottlenecks && data.bottlenecks.length > 0) {
         let html = `<table>
           <thead>
             <tr>
-              <th>連線名稱</th>
+              <th>連線名稱 / ID</th>
               <th>來源元件</th>
               <th>目標元件</th>
               <th>積壓數量</th>
@@ -277,6 +220,7 @@
             </tr>
           </thead>
           <tbody>`;
+
         data.bottlenecks.forEach(b => {
           html += `<tr>
             <td><strong>${b.connection_name || b.connection_id}</strong></td>
@@ -287,13 +231,14 @@
             <td>${b.percent_use_count}% / ${b.percent_use_bytes}%</td>
           </tr>`;
         });
-        html += </tbody></table>;
+
+        html += `</tbody></table>`;
         bContainer.innerHTML = html;
       } else {
-        bContainer.innerHTML = <p class="empty-msg">佇列正常，無背壓或堵塞連線</p>;
+        bContainer.innerHTML = `<p class="empty-msg">佇列正常，無背壓或堵塞連線</p>`;
       }
 
-      // 渲染 Invalid Processors 表格
+      // 3. 渲染 Invalid Processors 表格
       const pContainer = document.getElementById("invalidContainer");
       if (data.invalid_processors && data.invalid_processors.length > 0) {
         let html = `<table>
@@ -306,29 +251,42 @@
             </tr>
           </thead>
           <tbody>`;
+
         data.invalid_processors.forEach(p => {
-          const errors = (p.validation_errors || []).join("<br>");
+          const errors = Array.isArray(p.validation_errors) 
+            ? p.validation_errors.join("<br>") 
+            : (p.validation_errors || "-");
+
           html += `<tr>
-            <td><strong>${p.name}</strong></td>
-            <td>${(p.type || "").split('.').pop()}</td>
-            <td><span class="badge badge-danger">${p.validation_status}</span></td>
-            <td style="color: #fca5a5; font-size: 0.8rem;">${errors || "無具體說明"}</td>
+            <td><strong>${p.name || p.id}</strong></td>
+            <td>${p.type || "-"}</td>
+            <td><span class="badge badge-danger">${p.state || "INVALID"}</span></td>
+            <td>${errors}</td>
           </tr>`;
         });
-        html += </tbody></table>;
+
+        html += `</tbody></table>`;
         pContainer.innerHTML = html;
       } else {
-        pContainer.innerHTML = <p class="empty-msg">所有元件運作正常 (Valid)</p>;
+        pContainer.innerHTML = `<p class="empty-msg">所有 Processor 皆正常運行，無驗證錯誤</p>`;
       }
     }
 
     async function refreshMonitor() {
       try {
-        const response = await fetch(FIREBASE_URL);
-        if (!response.ok) {
-          throw new Error(HTTP ${response.status});
+        const res = await fetch(GIST_URL);
+        if (!res.ok) {
+          throw new Error(`HTTP 錯誤: ${res.status}`);
         }
-        const data = await response.json();
+
+        const text = await res.text();
+
+        // 避免伺服器回傳 HTML 網頁（例如 404/錯誤頁）導致 JSON.parse 報 Unexpected token '<'
+        if (text.trim().startsWith("<")) {
+          throw new Error("伺服器回傳了 HTML 而非 JSON 格式");
+        }
+
+        const data = JSON.parse(text);
 
         if (!data) {
           setConnectionStatus(false, "資料庫目前無資料 (請確認 Python 程式是否正在運行)");
@@ -336,8 +294,11 @@
         }
 
         renderDashboard(data);
-        const updateTime = data.timestamp ? new Date(data.timestamp).toLocaleTimeString() : new Date().toLocaleTimeString();
-        setConnectionStatus(true, 最後同步: ${updateTime});
+        const updateTime = data.timestamp 
+          ? new Date(data.timestamp).toLocaleTimeString() 
+          : new Date().toLocaleTimeString();
+
+        setConnectionStatus(true, `最後同步: ${updateTime}`);
       } catch (err) {
         setConnectionStatus(false, "無法連線至資料庫");
         console.error("Fetch error:", err);
