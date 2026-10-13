@@ -1,128 +1,119 @@
 <!DOCTYPE html>
 <html lang="zh-Hant">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>NiFi 即時流程監控中心</title>
+  <meta charset="UTF-8">
+  <title>NiFi 流程即時監控</title>
   <style>
     :root {
-      --bg-dark: #0f172a;
+      --bg: #0f172a;
       --card-bg: #1e293b;
-      --card-border: #334155;
-      --text-main: #f8fafc;
+      --border: #334155;
+      --text: #f8fafc;
       --text-muted: #94a3b8;
-      --accent-flow: #38bdf8;
-      --accent-success: #10b981;
-      --accent-warn: #f59e0b;
-      --accent-err: #ef4444;
+      --accent: #38bdf8;
+      --danger: #ef4444;
+      --warning: #f59e0b;
+      --success: #22c55e;
     }
 
     * {
       box-sizing: border-box;
-      margin: 0;
-      padding: 0;
     }
 
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-      background-color: var(--bg-dark);
-      color: var(--text-main);
+      background-color: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      margin: 0;
       padding: 24px;
       line-height: 1.5;
     }
 
-    .container {
-      max-width: 1400px;
-      margin: 0 auto;
-    }
-
-    /* 頂部導覽與狀態列 */
-    header {
+    .header {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      padding-bottom: 20px;
-      border-bottom: 1px solid var(--card-border);
       margin-bottom: 24px;
       flex-wrap: wrap;
       gap: 12px;
     }
 
-    .brand-title {
-      font-size: 1.4rem;
-      font-weight: 700;
-      letter-spacing: 0.5px;
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }
-
-    .header-actions {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      font-size: 0.85rem;
-    }
-
-    .connection-status {
+    .status-badge {
+      padding: 6px 14px;
+      border-radius: 999px;
+      font-size: 13px;
+      font-weight: 600;
       display: inline-flex;
       align-items: center;
       gap: 6px;
-      padding: 4px 12px;
-      border-radius: 999px;
-      background: #334155;
-      color: var(--text-muted);
+    }
+
+    .status-online {
+      background-color: rgba(34, 197, 94, 0.2);
+      color: var(--success);
+    }
+
+    .status-offline {
+      background-color: rgba(239, 68, 68, 0.2);
+      color: var(--danger);
+    }
+
+    .actions-bar {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+
+    .btn {
+      background-color: var(--card-bg);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 8px 16px;
+      border-radius: 6px;
+      cursor: pointer;
       font-weight: 500;
-      transition: all 0.3s ease;
+      font-size: 13px;
+      transition: all 0.2s;
     }
 
-    .connection-status.connected {
-      background: rgba(16, 185, 129, 0.15);
-      color: var(--accent-success);
+    .btn:hover {
+      background-color: var(--border);
+      border-color: var(--accent);
     }
 
-    .connection-status.disconnected {
-      background: rgba(239, 68, 68, 0.15);
-      color: var(--accent-err);
+    .btn-primary {
+      background-color: #0284c7;
+      border-color: #0284c7;
     }
 
-    .status-dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: currentColor;
+    .btn-primary:hover {
+      background-color: #0369a1;
     }
 
-    .update-time {
-      color: var(--text-muted);
-    }
-
-    /* 區塊標題 */
     .section-title {
-      font-size: 1.1rem;
+      font-size: 16px;
       font-weight: 600;
-      margin-bottom: 16px;
+      margin: 28px 0 14px;
       display: flex;
       align-items: center;
       gap: 8px;
-      color: #e2e8f0;
     }
 
     /* Process Group 卡片網格 */
     .pg-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
-      gap: 20px;
-      margin-bottom: 36px;
+      grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+      gap: 18px;
+      margin-bottom: 28px;
     }
 
     .pg-card {
-      background: var(--card-bg);
-      border: 1px solid var(--card-border);
+      background-color: var(--card-bg);
+      border: 1px solid var(--border);
       border-radius: 10px;
       padding: 18px;
+      transition: border-color 0.25s, box-shadow 0.25s, transform 0.2s;
       position: relative;
-      transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
     }
 
     .pg-card:hover {
@@ -130,8 +121,8 @@
     }
 
     .pg-card.is-active {
-      border-color: rgba(56, 189, 248, 0.7);
-      box-shadow: 0 0 20px rgba(56, 189, 248, 0.12);
+      border-color: var(--accent);
+      box-shadow: 0 0 18px rgba(56, 189, 248, 0.16);
     }
 
     .pg-header {
@@ -139,46 +130,61 @@
       justify-content: space-between;
       align-items: flex-start;
       margin-bottom: 12px;
-      gap: 8px;
+      gap: 10px;
     }
 
     .pg-name {
-      font-size: 1.05rem;
       font-weight: 600;
+      font-size: 15px;
       color: #ffffff;
       word-break: break-all;
     }
 
-    .pg-badge {
-      font-size: 0.75rem;
-      padding: 2px 8px;
-      border-radius: 6px;
-      font-weight: 600;
-      white-space: nowrap;
+    .pg-state-pill {
+      font-size: 11px;
+      padding: 3px 8px;
+      border-radius: 999px;
       background: #334155;
       color: var(--text-muted);
+      white-space: nowrap;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
     }
 
-    .pg-badge.running {
-      background: rgba(16, 185, 129, 0.2);
-      color: #34d399;
+    .pg-state-pill.active {
+      background: rgba(34, 197, 94, 0.18);
+      color: var(--success);
+    }
+
+    .state-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+
+    .pg-state-pill.active .state-dot {
+      box-shadow: 0 0 6px var(--success);
+      animation: pulseDot 1.5s infinite;
     }
 
     /* FlowFile 動態流動軌道 */
-    .stream-container {
-      margin: 14px 0;
+    .stream-wrapper {
+      margin: 14px 0 16px;
     }
 
-    .stream-label-row {
+    .stream-meta {
       display: flex;
       justify-content: space-between;
-      font-size: 0.75rem;
+      font-size: 11px;
       color: var(--text-muted);
       margin-bottom: 4px;
     }
 
     .stream-track {
-      height: 8px;
+      height: 7px;
       background: #090d16;
       border-radius: 4px;
       overflow: hidden;
@@ -199,316 +205,380 @@
       );
     }
 
-    /* 運行中的動態傳輸效果 */
-    .stream-flow.active {
+    .stream-flow.flowing {
       opacity: 1;
       background: repeating-linear-gradient(
         90deg,
-        var(--accent-flow) 0px,
-        var(--accent-flow) 14px,
+        var(--accent) 0px,
+        var(--accent) 14px,
         rgba(56, 189, 248, 0.2) 14px,
         rgba(56, 189, 248, 0.2) 28px
       );
       background-size: 56px 100%;
-      animation: flowMoving 0.9s linear infinite;
+      animation: streamFlowing 0.85s linear infinite;
     }
 
-    @keyframes flowMoving {
+    @keyframes streamFlowing {
       0% { background-position: 0 0; }
       100% { background-position: 56px 0; }
     }
 
-    /* PG 數據欄位 */
-    .pg-stats-grid {
-      display: grid;
-      grid-template-columns: repeat(2, 1fr);
-      gap: 10px;
-      margin-top: 14px;
+    @keyframes pulseDot {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.35; transform: scale(0.8); }
     }
 
-    .stat-box {
+    /* PG 數據欄位 */
+    .pg-metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 8px;
+    }
+
+    .metric-cell {
       background: #0f172a;
-      padding: 10px 12px;
+      padding: 8px 10px;
       border-radius: 6px;
       border: 1px solid rgba(255, 255, 255, 0.03);
     }
 
-    .stat-title {
-      font-size: 0.7rem;
+    .metric-name {
+      font-size: 11px;
       color: var(--text-muted);
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
       margin-bottom: 2px;
     }
 
-    .stat-val {
-      font-size: 1.05rem;
+    .metric-data {
+      font-size: 14px;
       font-weight: 700;
       color: #f1f5f9;
     }
 
-    .stat-val.has-queue {
-      color: var(--accent-warn);
+    .metric-data.warn {
+      color: var(--warning);
     }
 
-    .stat-val.has-active {
-      color: var(--accent-flow);
+    .metric-data.highlight {
+      color: var(--accent);
     }
 
-    /* 警報/異常 Bulletin 表格 */
-    .bulletins-section {
-      background: var(--card-bg);
-      border: 1px solid var(--card-border);
-      border-radius: 10px;
-      padding: 20px;
-    }
-
+    /* 表格樣式 */
     table {
       width: 100%;
       border-collapse: collapse;
-      font-size: 0.85rem;
+      background-color: var(--card-bg);
+      border-radius: 8px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+    }
+
+    th, td {
+      padding: 10px 14px;
       text-align: left;
+      font-size: 13px;
+      border-bottom: 1px solid var(--border);
     }
 
     th {
+      background-color: #162032;
       color: var(--text-muted);
-      font-weight: 600;
-      padding: 10px 12px;
-      border-bottom: 1px solid var(--card-border);
-      font-size: 0.75rem;
-      text-transform: uppercase;
     }
 
-    td {
-      padding: 12px;
-      border-bottom: 1px solid rgba(51, 65, 85, 0.5);
-      color: #cbd5e1;
-      vertical-align: top;
-      word-break: break-all;
-    }
-
-    tr:last-child td {
-      border-bottom: none;
-    }
-
-    .badge-err {
-      background: rgba(239, 68, 68, 0.2);
-      color: #f87171;
-      padding: 2px 6px;
-      border-radius: 4px;
-      font-size: 0.75rem;
-      font-weight: 600;
-    }
-
-    .badge-warn {
-      background: rgba(245, 158, 11, 0.2);
-      color: #fbbf24;
-      padding: 2px 6px;
-      border-radius: 4px;
-      font-size: 0.75rem;
-      font-weight: 600;
-    }
-
-    .empty-placeholder {
+    .empty-state {
+      padding: 18px;
       text-align: center;
-      padding: 28px;
       color: var(--text-muted);
-      font-size: 0.9rem;
+      font-size: 13px;
     }
+
+    .badge-warn { color: var(--warning); font-weight: 600; }
+    .badge-err { color: var(--danger); font-weight: bold; }
   </style>
 </head>
 <body>
-  <div class="container">
-    <header>
-      <div class="brand-title">
-        <span>⚡ NiFi Process Groups 即時監控</span>
-      </div>
-      <div class="header-actions">
-        <div id="connectionStatus" class="connection-status">
-          <span class="status-dot"></span>
-          <span id="connectionText">連線中...</span>
-        </div>
-        <div id="lastUpdated" class="update-time">-</div>
-      </div>
-    </header>
 
-    <!-- PG 獨立監控區域 -->
-    <div class="section-title">流程群組運行動態 (Process Groups)</div>
-    <div id="pgContainer" class="pg-grid">
-      <div class="empty-placeholder">載入流程群組資料中...</div>
-    </div>
-
-    <!-- 系統 Bulletin 警告/錯誤 -->
-    <div class="bulletins-section">
-      <div class="section-title" style="margin-bottom: 12px;">即時公告與異常訊息 (Bulletins)</div>
-      <table>
-        <thead>
-          <tr>
-            <th style="width: 90px;">等級</th>
-            <th style="width: 220px;">來源元件</th>
-            <th>訊息內容</th>
-          </tr>
-        </thead>
-        <tbody id="bulletinsBody">
-          <tr>
-            <td colspan="3" class="empty-placeholder">暫無異常公告</td>
-          </tr>
-        </tbody>
-      </table>
+  <div class="header">
+    <h2 style="margin: 0;">⚡ NiFi 流程即時監控</h2>
+    <div>
+      <span id="connectionStatus" class="status-badge status-offline">連線檢查中...</span>
+      <span id="lastUpdated" style="font-size: 13px; color: var(--text-muted); margin-left: 12px;"></span>
     </div>
   </div>
 
+  <div class="actions-bar">
+    <button class="btn btn-primary" onclick="copyCurrentJson()">📋 複製完整 JSON (餵給 AI / Debug)</button>
+    <button class="btn" onclick="fetchData()">🔄 手動整理</button>
+  </div>
+
+  <!-- 依 Process Group 獨立監控 -->
+  <div class="section-title">📦 流程群組動態 (Process Groups)</div>
+  <div id="pgContainer" class="pg-grid">
+    <div class="empty-state" style="grid-column: 1 / -1; background: var(--card-bg); border-radius: 8px;">載入流程群組資料中...</div>
+  </div>
+
+  <!-- 壅塞連線監控 (Bottlenecks) -->
+  <div class="section-title">🚨 壅塞 / 佇列積壓連線 (Bottlenecks)</div>
+  <table>
+    <thead>
+      <tr>
+        <th>連線名稱</th>
+        <th>來源端</th>
+        <th>目的端</th>
+        <th>積壓數量</th>
+        <th>容量使用率</th>
+      </tr>
+    </thead>
+    <tbody id="bottlenecksBody">
+      <tr><td colspan="5" class="empty-state">檢查壅塞連線中...</td></tr>
+    </tbody>
+  </table>
+
+  <!-- 無效處理器清單 -->
+  <div class="section-title">⚠️ 無效處理器 (Invalid Processors)</div>
+  <table>
+    <thead>
+      <tr>
+        <th>名稱</th>
+        <th>狀態</th>
+        <th>類型</th>
+        <th>驗證錯誤原因</th>
+      </tr>
+    </thead>
+    <tbody id="invalidProcessorsBody">
+      <tr><td colspan="4" class="empty-state">檢查處理器中...</td></tr>
+    </tbody>
+  </table>
+
+  <!-- 系統告警日誌 (Bulletins) -->
+  <div class="section-title">📜 即時 Bulletin 告警通知</div>
+  <table>
+    <thead>
+      <tr>
+        <th>層級</th>
+        <th>節點 / 元件</th>
+        <th>訊息內容</th>
+      </tr>
+    </thead>
+    <tbody id="bulletinsBody">
+      <tr><td colspan="3" class="empty-state">檢查告警訊息中...</td></tr>
+    </tbody>
+  </table>
+
   <script>
-    // 填入 Firebase 即時資料庫 URL 或 API 節點
-    const FIREBASE_URL = "https://your-firebase-database.firebasedatabase.app/nifi_status.json";
+    const FIREBASE_URL = "https://nifi-d2de1-default-rtdb.firebaseio.com/nifi_monitor.json";
     const POLL_INTERVAL = 3000;
+    let latestData = null;
 
-    const connectionStatusEl = document.getElementById("connectionStatus");
-    const connectionTextEl = document.getElementById("connectionText");
-    const lastUpdatedEl = document.getElementById("lastUpdated");
-    const pgContainer = document.getElementById("pgContainer");
-    const bulletinsBody = document.getElementById("bulletinsBody");
-
-    function setConnectionStatus(isConnected, text) {
-      if (isConnected) {
-        connectionStatusEl.className = "connection-status connected";
-        connectionTextEl.textContent = text || "連線正常";
-      } else {
-        connectionStatusEl.className = "connection-status disconnected";
-        connectionTextEl.textContent = text || "連線中斷";
-      }
+    function setConnectionStatus(isOnline, message) {
+      const el = document.getElementById("connectionStatus");
+      if (!el) return;
+      el.className = `status-badge ${isOnline ? "status-online" : "status-offline"}`;
+      el.textContent = message;
     }
 
-    // 解析各 PG 狀態（相容 NiFi 原生快照結構或自定義結構）
+    function copyCurrentJson() {
+      if (!latestData) {
+        alert("尚無可複製的資料！");
+        return;
+      }
+      navigator.clipboard.writeText(JSON.stringify(latestData, null, 2))
+        .then(() => alert("已複製即時 JSON 到剪貼簿！可直接貼給 AI 分析。"))
+        .catch(err => {
+          console.error("複製失敗", err);
+          alert("複製失敗，請手動複製主控台輸出。");
+        });
+    }
+
+    // 解析 Process Group 快照（向下相容巢狀 aggregateSnapshot 與直接傳陣列）
     function parseProcessGroups(data) {
       if (!data) return [];
-
-      // 若後端已預先處理為清單
+      if (Array.isArray(data.process_groups)) return data.process_groups;
       if (Array.isArray(data.processGroups)) return data.processGroups;
       if (Array.isArray(data.pgs)) return data.pgs;
 
-      // 若為 NiFi aggregateSnapshot 原始樹狀結構
-      const rootSnap = data.processGroupStatus?.aggregateSnapshot ||
-                       data.aggregateSnapshot ||
+      const rootSnap = data.aggregateSnapshot ||
+                       data.processGroupStatus?.aggregateSnapshot ||
                        (data.status && data.status.aggregateSnapshot);
 
-      if (rootSnap && Array.isArray(rootSnap.processGroupStatusSnapshots)) {
-        return rootSnap.processGroupStatusSnapshots.map(item => {
-          const snap = item.processGroupStatusSnapshot || item;
-          return {
-            id: snap.id,
-            name: snap.name || "未命名流程群組",
-            activeThreadCount: Number(snap.activeThreadCount || 0),
-            queuedCount: Number(snap.flowFilesQueued || snap.queuedCount || 0),
-            bytesQueued: snap.bytesQueued || "0 B",
-            flowFilesIn: Number(snap.flowFilesIn || snap.bytesIn || 0),
-            flowFilesOut: Number(snap.flowFilesOut || snap.bytesOut || 0)
-          };
-        });
+      if (rootSnap) {
+        if (Array.isArray(rootSnap.processGroupStatusSnapshots) && rootSnap.processGroupStatusSnapshots.length > 0) {
+          return rootSnap.processGroupStatusSnapshots.map(item => {
+            const snap = item.processGroupStatusSnapshot || item;
+            return {
+              id: snap.id,
+              name: snap.name || "未命名流程群組",
+              activeThreadCount: Number(snap.activeThreadCount || 0),
+              queuedCount: Number(snap.flowFilesQueued || snap.queuedCount || 0),
+              bytesQueued: snap.bytesQueued || "0 B",
+              flowFilesIn: Number(snap.flowFilesIn || snap.bytesIn || 0),
+              flowFilesOut: Number(snap.flowFilesOut || snap.bytesOut || 0)
+            };
+          });
+        }
+
+        // 若無子群組則顯示 Root 本身
+        return [{
+          id: rootSnap.id || "root",
+          name: rootSnap.name || "Root Process Group",
+          activeThreadCount: Number(rootSnap.activeThreadCount || 0),
+          queuedCount: Number(rootSnap.flowFilesQueued || rootSnap.queuedCount || 0),
+          bytesQueued: rootSnap.bytesQueued || "0 B",
+          flowFilesIn: Number(rootSnap.flowFilesIn || 0),
+          flowFilesOut: Number(rootSnap.flowFilesOut || 0)
+        }];
       }
 
       return [];
     }
 
-    function renderDashboard(data) {
-      lastUpdatedEl.textContent = `最後同步：${new Date().toLocaleTimeString()}`;
-
-      // 1. 渲染各 Process Group 卡片
+    function renderProcessGroups(data) {
+      const container = document.getElementById("pgContainer");
       const pgs = parseProcessGroups(data);
+
       if (pgs.length === 0) {
-        pgContainer.innerHTML = `<div class="empty-placeholder">未偵測到任何子 Process Group</div>`;
-      } else {
-        pgContainer.innerHTML = pgs.map(pg => {
-          // 當執行緒 > 0 或 5 分鐘內有流量進出時視為流動中
-          const isFlowing = (pg.activeThreadCount > 0) || (pg.flowFilesIn > 0) || (pg.flowFilesOut > 0);
-          const hasQueued = (pg.queuedCount > 0);
+        container.innerHTML = `<div class="empty-state" style="grid-column: 1 / -1; background: var(--card-bg); border-radius: 8px;">未偵測到任何 Process Group 資訊</div>`;
+        return;
+      }
 
-          return `
-            <div class="pg-card ${isFlowing ? 'is-active' : ''}">
-              <div class="pg-header">
-                <span class="pg-name">${pg.name}</span>
-                <span class="pg-badge ${isFlowing ? 'running' : ''}">
-                  ${isFlowing ? '⚡ 流動中' : '💤 閒置'}
-                </span>
+      container.innerHTML = pgs.map(pg => {
+        const isFlowing = (pg.activeThreadCount > 0) || (pg.flowFilesIn > 0) || (pg.flowFilesOut > 0);
+        const hasBacklog = (pg.queuedCount > 0);
+
+        return `
+          <div class="pg-card ${isFlowing ? 'is-active' : ''}">
+            <div class="pg-header">
+              <span class="pg-name">${pg.name}</span>
+              <span class="pg-state-pill ${isFlowing ? 'active' : ''}">
+                <span class="state-dot"></span>
+                ${isFlowing ? '流動中 (Active)' : '閒置 (Idle)'}
+              </span>
+            </div>
+
+            <!-- FlowFile 動態流動軌道 -->
+            <div class="stream-wrapper">
+              <div class="stream-meta">
+                <span>FlowFile 串流狀態</span>
+                <span>${isFlowing ? '資料正在流動' : '靜止'}</span>
               </div>
-
-              <!-- 動態虛線傳輸條 -->
-              <div class="stream-container">
-                <div class="stream-label-row">
-                  <span>FlowFile Stream</span>
-                  <span>${isFlowing ? '傳輸中' : '靜止'}</span>
-                </div>
-                <div class="stream-track">
-                  <div class="stream-flow ${isFlowing ? 'active' : ''}"></div>
-                </div>
-              </div>
-
-              <div class="pg-stats-grid">
-                <div class="stat-box">
-                  <div class="stat-title">佇列 (Queued)</div>
-                  <div class="stat-val ${hasQueued ? 'has-queue' : ''}">
-                    ${pg.queuedCount.toLocaleString()} <span style="font-size:0.75rem;font-weight:normal;color:#94a3b8;">筆</span>
-                  </div>
-                </div>
-
-                <div class="stat-box">
-                  <div class="stat-title">執行緒 (Threads)</div>
-                  <div class="stat-val ${pg.activeThreadCount > 0 ? 'has-active' : ''}">
-                    ${pg.activeThreadCount}
-                  </div>
-                </div>
-
-                <div class="stat-box">
-                  <div class="stat-title">流入 (In / 5m)</div>
-                  <div class="stat-val">${pg.flowFilesIn.toLocaleString()}</div>
-                </div>
-
-                <div class="stat-box">
-                  <div class="stat-title">流出 (Out / 5m)</div>
-                  <div class="stat-val">${pg.flowFilesOut.toLocaleString()}</div>
-                </div>
+              <div class="stream-track">
+                <div class="stream-flow ${isFlowing ? 'flowing' : ''}"></div>
               </div>
             </div>
-          `;
-        }).join("");
+
+            <div class="pg-metrics-grid">
+              <div class="metric-cell">
+                <div class="metric-name">佇列積壓 (Queued)</div>
+                <div class="metric-data ${hasBacklog ? 'warn' : ''}">
+                  ${pg.queuedCount.toLocaleString()} <span style="font-size:11px;font-weight:normal;color:#94a3b8;">筆</span>
+                </div>
+              </div>
+
+              <div class="metric-cell">
+                <div class="metric-name">執行緒 (Threads)</div>
+                <div class="metric-data ${pg.activeThreadCount > 0 ? 'highlight' : ''}">
+                  ${pg.activeThreadCount}
+                </div>
+              </div>
+
+              <div class="metric-cell">
+                <div class="metric-name">5分鐘流入 (In)</div>
+                <div class="metric-data">${pg.flowFilesIn.toLocaleString()}</div>
+              </div>
+
+              <div class="metric-cell">
+                <div class="metric-name">5分鐘流出 (Out)</div>
+                <div class="metric-data">${pg.flowFilesOut.toLocaleString()}</div>
+              </div>
+            </div>
+          </div>
+        `;
+      }).join("");
+    }
+
+    function renderBottlenecks(data) {
+      const tbody = document.getElementById("bottlenecksBody");
+      const list = data.bottlenecks || data.bottleneck_connections || [];
+
+      if (!list || list.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="5" class="empty-state">目前無壅塞連線 (佇列暢通)</td></tr>`;
+        return;
       }
 
-      // 2. 渲染 Bulletins
-      const rawBulletins = data.bulletins ||
-                           data.bulletinBoard?.bulletins ||
-                           (data.bulletinBoard && data.bulletinBoard.bulletins) || [];
+      tbody.innerHTML = list.map(b => `
+        <tr>
+          <td>${b.name || b.id || "-"}</td>
+          <td>${b.sourceName || b.source?.name || "-"}</td>
+          <td>${b.destinationName || b.destination?.name || "-"}</td>
+          <td class="badge-warn">${Number(b.queuedCount || b.flowFilesQueued || 0).toLocaleString()} 筆</td>
+          <td>${b.percentUse || b.percentUseBytes || "0%"}</td>
+        </tr>
+      `).join("");
+    }
 
-      if (!rawBulletins || rawBulletins.length === 0) {
-        bulletinsBody.innerHTML = `<tr><td colspan="3" class="empty-placeholder">目前無異常警報</td></tr>`;
-      } else {
-        bulletinsBody.innerHTML = rawBulletins.slice(0, 10).map(b => {
-          const item = b.bulletin || b;
-          const isErr = item.level === "ERROR";
-          return `
-            <tr>
-              <td><span class="${isErr ? 'badge-err' : 'badge-warn'}">${item.level || "INFO"}</span></td>
-              <td>${item.sourceName || item.sourceId || "-"}</td>
-              <td>${item.message || "-"}</td>
-            </tr>
-          `;
-        }).join("");
+    function renderInvalidProcessors(data) {
+      const tbody = document.getElementById("invalidProcessorsBody");
+      const list = data.invalid_processors || data.invalidProcessors || [];
+
+      if (!list || list.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="4" class="empty-state">無任何驗證錯誤處理器</td></tr>`;
+        return;
       }
+
+      tbody.innerHTML = list.map(p => `
+        <tr>
+          <td>${p.name || "-"}</td>
+          <td><span class="badge-err">${p.runStatus || p.state || "INVALID"}</span></td>
+          <td>${p.type || "-"}</td>
+          <td style="color: var(--danger); font-size: 12px;">${(p.validationErrors || []).join("<br>") || "-"}</td>
+        </tr>
+      `).join("");
+    }
+
+    function renderBulletins(data) {
+      const tbody = document.getElementById("bulletinsBody");
+      const list = data.bulletins ||
+                   data.bulletinBoard?.bulletins ||
+                   (data.bulletinBoard && data.bulletinBoard.bulletins) || [];
+
+      if (!list || list.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="3" class="empty-state">目前無告警通知</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = list.slice(0, 15).map(b => {
+        const item = b.bulletin || b;
+        const isErr = item.level === "ERROR";
+        return `
+          <tr>
+            <td><span class="${isErr ? 'badge-err' : 'badge-warn'}">${item.level || "INFO"}</span></td>
+            <td>${item.sourceName || item.sourceId || "-"}</td>
+            <td>${item.message || "-"}</td>
+          </tr>
+        `;
+      }).join("");
     }
 
     async function fetchData() {
       try {
-        const res = await fetch(FIREBASE_URL);
+        const res = await fetch(FIREBASE_URL, { cache: "no-store" });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
+        latestData = data;
+
         setConnectionStatus(true, "連線正常");
-        renderDashboard(data);
+        document.getElementById("lastUpdated").textContent = `最後同步：${new Date().toLocaleTimeString()}`;
+
+        renderProcessGroups(data);
+        renderBottlenecks(data);
+        renderInvalidProcessors(data);
+        renderBulletins(data);
       } catch (err) {
-        setConnectionStatus(false, "連線失敗");
-        console.error("Fetch error:", err);
+        console.error("讀取 Firebase 資料失敗：", err);
+        setConnectionStatus(false, "連線中斷 / 讀取失敗");
       }
     }
 
-    // 啟動定時輪詢
+    // 初次載入並啟動 3 秒定時輪詢
     fetchData();
     setInterval(fetchData, POLL_INTERVAL);
   </script>
