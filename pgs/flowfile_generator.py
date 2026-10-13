@@ -21,7 +21,7 @@ def create_flowfile_generator_pg(parent_pg=None, **kwargs):
         location=(300, 300),
     )
 
-    # 2. 建立產生器 (每 0.5 秒產生 100B 小資料)
+    # 2. 建立資料產生器 (每 0.5 秒產生 100B 小資料)
     gen = nipyapi.canvas.create_processor(
         parent_pg=gen_pg,
         processor=get_type("GenerateFlowFile"),
@@ -36,7 +36,7 @@ def create_flowfile_generator_pg(parent_pg=None, **kwargs):
         ),
     )
 
-    # 3. 建立下游 Sink (保持 STOPPED，用來當作緩衝端點)
+    # 3. 建立下游 Sink (保持 STOPPED 以累積佇列)
     sink = nipyapi.canvas.create_processor(
         parent_pg=gen_pg,
         processor=get_type("LogAttribute"),
@@ -58,8 +58,7 @@ def create_flowfile_generator_pg(parent_pg=None, **kwargs):
         name="Pressure_Queue",
     )
 
-    # 5. 設定自動到期機制 (TTL: 30 秒過期自動丟棄)
-    # 透過 NiFi 底層 ConnectionsApi 直接更新連線屬性，完全不依賴 canvas 不支援的方法
+    # 5. 設定 30 秒過期機制 (滿了自動丟棄舊資料，永遠流動且絕不塞爆硬碟)
     conn_entity = nipyapi.nifi.ConnectionsApi().get_connection(conn.id)
     conn_entity.component.flow_file_expiration = "30 sec"
     nipyapi.nifi.ConnectionsApi().update_connection(
@@ -75,7 +74,7 @@ def create_flowfile_generator_pg(parent_pg=None, **kwargs):
         name="Invalid_Test_Processor",
     )
 
-    # 7. 啟動產生器 (Sink 維持停止，由 30 秒 Expiration 自動清掉舊資料)
+    # 7. 啟動產生器 (下游 Sink 維持停止)
     nipyapi.canvas.schedule_processor(gen, True)
 
     return gen_pg

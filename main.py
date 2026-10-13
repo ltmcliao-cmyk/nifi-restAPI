@@ -1,35 +1,46 @@
 # main.py
 import os
-import time
 import nipyapi
 from pgs import local_2_SQL, flowfile_generator
 import routes
 
-def cleanup_junk_and_old_generators(root_id, keep_pg_id=None):
-    """清除 Root 上所有散落元件，以及除 keep_pg_id 以外的所有 Process Group"""
-    # 1. 清除 Root 層殘留的連線與處理器
+
+def cleanup_only_root_junk_and_old_generators(root_pg, keep_pg_id):
+    """
+    精確清理：
+    1. 只刪除隸屬於 Root 畫布上的散落元件（不碰任何子 PG 內部元件）
+    2. 刪除除了 keep_pg_id 以外的其他 Process Group（例如舊的 FlowFile_Generator）
+    """
+    root_id = root_pg.id
+
+    # 1. 只刪除直接放在 Root 上的連線 (parent_group_id 為 root)
     for conn in nipyapi.canvas.list_all_connections(root_id):
+        # 關鍵過濾：不是直接掛在 Root 上的連線絕對不碰！
+        if conn.component.parent_group_id != root_id:
+            continue
         try:
             nipyapi.canvas.purge_connection(conn.id)
             nipyapi.canvas.delete_connection(conn)
         except Exception:
             pass
 
+    # 2. 只刪除直接放在 Root 上的散落處理器
     for proc in nipyapi.canvas.list_all_processors(root_id):
+        if proc.component.parent_group_id != root_id:
+            continue
         try:
             nipyapi.canvas.schedule_processor(proc, False)
             nipyapi.canvas.delete_processor(proc)
         except Exception:
             pass
 
-    # 2. 清除除了保留群組以外的所有其他 Process Group (包含歷史重複的 Generator)
+    # 3. 刪除除了 keep_pg_id 之外的子 Process Group
     for pg in nipyapi.canvas.list_all_process_groups(root_id):
-        if keep_pg_id and pg.id == keep_pg_id:
+        if pg.id == keep_pg_id:
             continue
-        # 遞迴關閉並刪除舊 PG
         try:
+            # 停止並清空該群組
             nipyapi.canvas.schedule_process_group(pg.id, False)
-            # 清理內部連線佇列後刪除
             for sub_conn in nipyapi.canvas.list_all_connections(pg.id):
                 nipyapi.canvas.purge_connection(sub_conn.id)
             nipyapi.canvas.delete_process_group(pg, refresh=True)
@@ -53,7 +64,7 @@ def main():
     }
     raw_data_dir = "/opt/nifi/nifi-current/data/raw"
 
-    # 1. 建立或鎖定你要保留的 Local_2_SQL PG
+    # 1. 建立或鎖定 Local_2_SQL PG (若內部缺件，函式會自動補齊)
     local_pg = local_2_SQL.create_local_2_sql_pg(
         parent_pg=root_pg,
         db_config=db_config,
@@ -62,10 +73,10 @@ def main():
         file_filter=".*",
     )
 
-    # 2. 核心：只保留 local_pg，其他歷史殘留 Process Group 與 Root 垃圾全部刪除
-    cleanup_junk_and_old_generators(root_id=root_pg.id, keep_pg_id=local_pg.id)
+    # 2. 精確清理：只清 Root 與舊 generator，絕不誤傷 local_pg
+    cleanup_only_root_junk_and_old_generators(root_pg=root_pg, keep_pg_id=local_pg.id)
 
-    # 3. 重新建立全新的 FlowFile_Generator (獨立群組，內部產生資料)
+    # 3. 建立全新的 FlowFile_Generator
     generator_pg = flowfile_generator.create_flowfile_generator_pg(parent_pg=root_pg)
 
     # 4. 連線路由
@@ -78,12 +89,12 @@ def main():
     nipyapi.canvas.schedule_process_group(local_pg.id, scheduled=True)
     nipyapi.canvas.schedule_process_group(generator_pg.id, scheduled=True)
 
-    # 6. 把 generator 裡的 Sink 停住，讓 Queue 持續堆積在它的專屬群組內
+    # 6. 把 generator 裡的 Sink 停住，讓資料留存在 Queue
     for proc in nipyapi.canvas.list_all_processors(generator_pg.id):
         if proc.component.name == "Queue_Sink_Stopped":
             nipyapi.canvas.schedule_processor(proc, scheduled=False)
 
-    print(f"[OK] 畫布清理完成，目前只保留: '{local_pg.component.name}' 與全新的 '{generator_pg.component.name}'")
+    print(f"[OK] 部署與防誤刪清理完成！保留: '{local_pg.component.name}' 與 '{generator_pg.component.name}'")
 
 
 if __name__ == "__main__":
