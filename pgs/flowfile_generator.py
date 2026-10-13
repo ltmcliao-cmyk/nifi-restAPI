@@ -36,37 +36,30 @@ def create_flowfile_generator_pg(parent_pg=None, **kwargs):
         ),
     )
 
-    # 3. 建立下游 Sink (保持 STOPPED 以累積佇列)
+    # 3. 建立下游 Sink：重點！設定 1 秒消化一次，並開啟 auto-terminate
     sink = nipyapi.canvas.create_processor(
         parent_pg=gen_pg,
         processor=get_type("LogAttribute"),
         location=(100, 350),
-        name="Queue_Sink_Stopped",
+        name="Queue_Sink_Flowing",
     )
     nipyapi.canvas.update_processor(
         sink,
         nipyapi.nifi.ProcessorConfigDTO(
-            auto_terminated_relationships=["success"]
+            scheduling_period="1 sec",  # 慢速消化，確保 Queue 保持積壓又一直在動
+            auto_terminated_relationships=["success"],
         ),
     )
 
     # 4. 建立連線
-    conn = nipyapi.canvas.create_connection(
+    nipyapi.canvas.create_connection(
         source=gen,
         target=sink,
         relationships=["success"],
         name="Pressure_Queue",
     )
 
-    # 5. 設定 30 秒過期機制 (滿了自動丟棄舊資料，永遠流動且絕不塞爆硬碟)
-    conn_entity = nipyapi.nifi.ConnectionsApi().get_connection(conn.id)
-    conn_entity.component.flow_file_expiration = "30 sec"
-    nipyapi.nifi.ConnectionsApi().update_connection(
-        id=conn.id,
-        body=conn_entity,
-    )
-
-    # 6. 放一個無效處理器供儀表板呈現警告
+    # 5. 放一個無效處理器供儀表板呈現警告
     nipyapi.canvas.create_processor(
         parent_pg=gen_pg,
         processor=get_type("UpdateAttribute"),
@@ -74,7 +67,8 @@ def create_flowfile_generator_pg(parent_pg=None, **kwargs):
         name="Invalid_Test_Processor",
     )
 
-    # 7. 啟動產生器 (下游 Sink 維持停止)
+    # 6. 同時啟動兩者（資料開始持續流動！）
     nipyapi.canvas.schedule_processor(gen, True)
+    nipyapi.canvas.schedule_processor(sink, True)
 
     return gen_pg
