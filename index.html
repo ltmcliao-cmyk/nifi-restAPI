@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>NiFi 即時流向監控儀表板 (無限制版)</title>
+  <title>NiFi 即時流向監控儀表板</title>
   <style>
     :root {
       --bg: #0f172a;
@@ -17,58 +17,244 @@
       --danger: #ef4444;
     }
 
-    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-    body { background-color: var(--bg); color: var(--text-main); padding: 24px; line-height: 1.5; }
-    .container { max-width: 1400px; margin: 0 auto; }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    }
+
+    body {
+      background-color: var(--bg);
+      color: var(--text-main);
+      padding: 24px;
+      line-height: 1.5;
+    }
+
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+    }
 
     header {
-      display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px;
-      padding-bottom: 20px; border-bottom: 1px solid var(--card-border); margin-bottom: 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 16px;
+      padding-bottom: 20px;
+      border-bottom: 1px solid var(--card-border);
+      margin-bottom: 24px;
     }
-    .header-title h1 { font-size: 24px; font-weight: 700; display: flex; align-items: center; gap: 12px; }
+
+    .header-title h1 {
+      font-size: 24px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
     .status-badge {
-      display: inline-flex; align-items: center; gap: 6px; font-size: 13px; padding: 4px 10px;
-      border-radius: 9999px; background: rgba(16, 185, 129, 0.15); color: var(--success); border: 1px solid rgba(16, 185, 129, 0.3);
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 13px;
+      padding: 4px 10px;
+      border-radius: 9999px;
+      background: rgba(16, 185, 129, 0.15);
+      color: var(--success);
+      border: 1px solid rgba(16, 185, 129, 0.3);
     }
-    .status-badge.error { background: rgba(239, 68, 68, 0.15); color: var(--danger); border-color: rgba(239, 68, 68, 0.3); }
-    .status-dot { width: 8px; height: 8px; border-radius: 50%; background-color: currentColor; }
-    .header-meta { display: flex; gap: 20px; align-items: center; font-size: 13px; color: var(--text-muted); }
+
+    .status-badge.error {
+      background: rgba(239, 68, 68, 0.15);
+      color: var(--danger);
+      border-color: rgba(239, 68, 68, 0.3);
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background-color: currentColor;
+    }
+
+    .header-meta {
+      display: flex;
+      gap: 20px;
+      align-items: center;
+      font-size: 13px;
+      color: var(--text-muted);
+    }
 
     .control-panel {
-      background-color: var(--card-bg); border: 1px solid var(--card-border); border-radius: 8px;
-      padding: 12px 16px; margin-bottom: 24px; display: flex; gap: 16px; align-items: center; font-size: 13px;
+      background-color: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-bottom: 24px;
+      display: flex;
+      gap: 16px;
+      align-items: center;
+      font-size: 13px;
     }
-    select { background: #0f172a; border: 1px solid var(--card-border); color: var(--text-main); padding: 6px 10px; border-radius: 6px; outline: none; }
-    button { background: #3b82f6; color: #fff; border: none; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-weight: 500; }
-    button:hover { background: #2563eb; }
 
-    .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
-    .kpi-card { background-color: var(--card-bg); border: 1px solid var(--card-border); border-radius: 10px; padding: 16px; display: flex; flex-direction: column; gap: 8px; }
-    .kpi-title { font-size: 13px; color: var(--text-muted); font-weight: 500; }
-    .kpi-value { font-size: 26px; font-weight: 700; color: var(--text-main); font-variant-numeric: tabular-nums; }
+    select {
+      background: #0f172a;
+      border: 1px solid var(--card-border);
+      color: var(--text-main);
+      padding: 6px 10px;
+      border-radius: 6px;
+      outline: none;
+    }
+
+    button {
+      background: #3b82f6;
+      color: #fff;
+      border: none;
+      padding: 6px 14px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-weight: 500;
+    }
+
+    button:hover {
+      background: #2563eb;
+    }
+
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+
+    .kpi-card {
+      background-color: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 10px;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .kpi-title {
+      font-size: 13px;
+      color: var(--text-muted);
+      font-weight: 500;
+    }
+
+    .kpi-value {
+      font-size: 26px;
+      font-weight: 700;
+      color: var(--text-main);
+      font-variant-numeric: tabular-nums;
+    }
+
     .kpi-card.warn .kpi-value { color: var(--warning); }
     .kpi-card.danger .kpi-value { color: var(--danger); }
     .kpi-card.highlight .kpi-value { color: var(--accent); }
 
-    .section-title { font-size: 16px; font-weight: 600; margin-bottom: 12px; }
-    .data-table-card { background-color: var(--card-bg); border: 1px solid var(--card-border); border-radius: 10px; overflow: hidden; margin-bottom: 24px; }
-    table { width: 100%; border-collapse: collapse; text-align: left; font-size: 13px; }
-    th { background: rgba(15, 23, 42, 0.6); color: var(--text-muted); font-weight: 600; padding: 12px 16px; border-bottom: 1px solid var(--card-border); }
-    td { padding: 12px 16px; border-bottom: 1px solid var(--card-border); color: var(--text-main); }
-    tr:last-child td { border-bottom: none; }
-    .empty-msg { text-align: center; padding: 32px; color: var(--text-muted); }
+    .section-title {
+      font-size: 16px;
+      font-weight: 600;
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
 
-    .progress-bar { background: #334155; height: 6px; border-radius: 3px; overflow: hidden; width: 100px; display: inline-block; vertical-align: middle; margin-right: 8px; }
-    .progress-fill { height: 100%; background: var(--warning); }
-    .progress-fill.danger { background: var(--danger); }
-    .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600; }
+    .data-table-card {
+      background-color: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 10px;
+      overflow: hidden;
+      margin-bottom: 24px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      text-align: left;
+      font-size: 13px;
+    }
+
+    th {
+      background: rgba(15, 23, 42, 0.6);
+      color: var(--text-muted);
+      font-weight: 600;
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--card-border);
+    }
+
+    td {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--card-border);
+      color: var(--text-main);
+    }
+
+    tr:last-child td {
+      border-bottom: none;
+    }
+
+    .empty-msg {
+      text-align: center;
+      padding: 32px;
+      color: var(--text-muted);
+    }
+
+    .progress-bar {
+      background: #334155;
+      height: 6px;
+      border-radius: 3px;
+      overflow: hidden;
+      width: 100px;
+      display: inline-block;
+      vertical-align: middle;
+      margin-right: 8px;
+    }
+
+    .progress-fill {
+      height: 100%;
+      background: var(--warning);
+    }
+
+    .progress-fill.danger {
+      background: var(--danger);
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+
     .badge-danger { background: rgba(239, 68, 68, 0.2); color: var(--danger); }
     .badge-warning { background: rgba(245, 158, 11, 0.2); color: var(--warning); }
     .badge-info { background: rgba(56, 189, 248, 0.2); color: var(--accent); }
 
-    .bulletin-item { padding: 10px 16px; border-bottom: 1px solid var(--card-border); display: flex; gap: 12px; align-items: flex-start; font-size: 13px; }
-    .bulletin-item:last-child { border-bottom: none; }
-    .bulletin-msg { flex: 1; font-family: monospace; color: #cbd5e1; }
+    .bulletin-item {
+      padding: 10px 16px;
+      border-bottom: 1px solid var(--card-border);
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+      font-size: 13px;
+    }
+
+    .bulletin-item:last-child {
+      border-bottom: none;
+    }
+
+    .bulletin-msg {
+      flex: 1;
+      font-family: monospace;
+      color: #cbd5e1;
+    }
   </style>
 </head>
 <body>
@@ -84,7 +270,7 @@
     </div>
     <div class="header-meta">
       <div>最後更新: <span id="last-updated" style="color: var(--text-main); font-weight: 500;">-</span></div>
-      <div>架構通道: <span style="color: var(--success); font-weight: 600;">Gist Raw CDN (無次數上限・免金鑰)</span></div>
+      <div>通道模式: <span style="color: var(--success); font-weight: 600;">Gist Raw CDN (免金鑰・無額度上限)</span></div>
     </div>
   </header>
 
@@ -180,10 +366,16 @@
 </div>
 
 <script>
-  // 透過 Gist 靜態 Raw CDN 直取資料
-  // 依你的 Gist ID 與檔名拼接
-  const GIST_RAW_URL = "https://gist.githubusercontent.com/lutomica/954552f04fc9dc1a6eb5b2d6d59cf403/raw/nifi_monitor.json";
+  const GIST_ID = "954552f04fc9dc1a6eb5b2d6d59cf403";
+  const GIST_FILENAME = "nifi_monitor.json";
 
+  // 自動依帳號候選清單解析正確的 Raw CDN 路徑
+  const RAW_URL_CANDIDATES = [
+    `https://gist.githubusercontent.com/ltmcliao/${GIST_ID}/raw/${GIST_FILENAME}`,
+    `https://gist.githubusercontent.com/lutomica/${GIST_ID}/raw/${GIST_FILENAME}`
+  ];
+
+  let verifiedRawUrl = null;
   let timerId = null;
 
   function formatBytes(bytes) {
@@ -194,25 +386,40 @@
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   }
 
-  async function fetchMetrics() {
+  // 自動輪詢抓取核心函式
+  async function fetchLatestData() {
     const statusBadge = document.getElementById('sync-status');
     const statusText = document.getElementById('sync-status-text');
 
     try {
-      // 加上時間戳 ?_t= 強制繞過瀏覽器快取，直連 Raw CDN
-      const response = await fetch(${GIST_RAW_URL}?_t=${Date.now()}, {
-        cache: 'no-store'
-      });
+      let response = null;
 
-      if (!response.ok) {
-        throw new Error(HTTP ${response.status});
+      // 1. 若已有驗證成功過的 Raw URL，直接請求
+      if (verifiedRawUrl) {
+        response = await fetch(${verifiedRawUrl}?_t=${Date.now()}, { cache: 'no-store' });
+      } else {
+        // 2. 初次載入時測試候選 URL，自動鎖定能通的帳號路徑
+        for (const url of RAW_URL_CANDIDATES) {
+          try {
+            const testRes = await fetch(${url}?_t=${Date.now()}, { cache: 'no-store' });
+            if (testRes.ok) {
+              verifiedRawUrl = url;
+              response = testRes;
+              break;
+            }
+          } catch (_) {}
+        }
+      }
+
+      if (!response || !response.ok) {
+        throw new Error(無法連線至 Raw CDN (HTTP ${response ? response.status : 'Timeout'}));
       }
 
       const payload = await response.json();
       renderUI(payload);
 
       statusBadge.className = 'status-badge';
-      statusText.textContent = '即時同步中 (無限制)';
+      statusText.textContent = '即時同步中 (Raw CDN)';
     } catch (err) {
       console.error('更新失敗:', err);
       statusBadge.className = 'status-badge error';
@@ -234,7 +441,7 @@
     document.getElementById('kpi-warnings').textContent = (kpi.warningCount || 0).toLocaleString();
     document.getElementById('kpi-invalid').textContent = (kpi.invalidComponentCount || 0).toLocaleString();
 
-    // 隊列積壓
+    // 隊列積壓 (Bottlenecks)
     const tbodyBottlenecks = document.getElementById('tbody-bottlenecks');
     const bottlenecks = data.bottlenecks || [];
     if (bottlenecks.length === 0) {
@@ -266,7 +473,7 @@
       }).join('');
     }
 
-    // 異常處理器
+    // 異常處理器 (Invalid Processors)
     const tbodyInvalid = document.getElementById('tbody-invalid');
     const invalidProcs = data.invalid_processors || [];
     if (invalidProcs.length === 0) {
@@ -282,7 +489,7 @@
       `).join('');
     }
 
-    // Bulletins
+    // Bulletins 看板
     const bulletinsContainer = document.getElementById('bulletins-container');
     const bulletins = data.bulletins || [];
     if (bulletins.length === 0) {
@@ -308,13 +515,14 @@
   function resetPolling() {
     if (timerId) clearInterval(timerId);
     const interval = parseInt(document.getElementById('cfg-interval').value, 10);
-    fetchMetrics();
-    timerId = setInterval(fetchMetrics, interval);
+    fetchLatestData();
+    timerId = setInterval(fetchLatestData, interval);
   }
 
-  document.getElementById('btn-manual-sync').addEventListener('click', fetchMetrics);
+  document.getElementById('btn-manual-sync').addEventListener('click', fetchLatestData);
   document.getElementById('cfg-interval').addEventListener('change', resetPolling);
 
+  // 初始化啟動
   resetPolling();
 </script>
 </body>
