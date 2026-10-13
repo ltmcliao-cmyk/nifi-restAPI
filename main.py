@@ -41,7 +41,7 @@ def main():
     )
 
     # 7. 路由保留介面
-    routes.create_inter_pg_routes()
+    routes.build_inter_pg_routes()
 
     # 8. 一鍵啟動全拓樸 (同時調度 local_pg 與 generator_pg)
     nipyapi.canvas.schedule_process_group(local_pg.id, scheduled=True)
