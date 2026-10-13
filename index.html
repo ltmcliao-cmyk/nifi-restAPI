@@ -21,7 +21,7 @@
       box-sizing: border-box;
       margin: 0;
       padding: 0;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     }
 
     body {
@@ -161,9 +161,6 @@
       font-size: 16px;
       font-weight: 600;
       margin-bottom: 12px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
     }
 
     .data-table-card {
@@ -284,7 +281,6 @@
     <button id="btn-manual-sync" style="margin-left: auto;">立即刷新</button>
   </div>
 
-  <!-- KPI 卡片 -->
   <div class="kpi-grid">
     <div class="kpi-card highlight">
       <div class="kpi-title">活躍線程數 (Active Threads)</div>
@@ -320,7 +316,6 @@
     </div>
   </div>
 
-  <!-- 隊列積壓與背壓 -->
   <div class="section-title">隊列積壓與背壓警示 (Bottlenecks)</div>
   <div class="data-table-card">
     <table>
@@ -340,7 +335,6 @@
     </table>
   </div>
 
-  <!-- 異常處理器 -->
   <div class="section-title">異常/校驗失敗處理器 (Validation Issues)</div>
   <div class="data-table-card">
     <table>
@@ -358,7 +352,6 @@
     </table>
   </div>
 
-  <!-- Bulletins 看板 -->
   <div class="section-title">即時告警公告看板 (Recent Bulletins)</div>
   <div class="data-table-card" id="bulletins-container">
     <div class="empty-msg">無任何警示或錯誤訊息</div>
@@ -369,160 +362,162 @@
   const GIST_ID = "954552f04fc9dc1a6eb5b2d6d59cf403";
   const GIST_FILENAME = "nifi_monitor.json";
 
-  // 自動依帳號候選清單解析正確的 Raw CDN 路徑
   const RAW_URL_CANDIDATES = [
-    `https://gist.githubusercontent.com/ltmcliao/${GIST_ID}/raw/${GIST_FILENAME}`,
-    `https://gist.githubusercontent.com/lutomica/${GIST_ID}/raw/${GIST_FILENAME}`
+    "https://gist.githubusercontent.com/lutomica/" + GIST_ID + "/raw/" + GIST_FILENAME,
+    "https://gist.githubusercontent.com/ltmcliao/" + GIST_ID + "/raw/" + GIST_FILENAME
   ];
 
   let verifiedRawUrl = null;
   let timerId = null;
 
   function formatBytes(bytes) {
-    if (!bytes || bytes === 0) return '0 B';
+    if (!bytes || bytes === 0) return "0 B";
     const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const sizes = ["B", "KB", "MB", "GB", "TB"];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
   }
 
-  // 自動輪詢抓取核心函式
   async function fetchLatestData() {
-    const statusBadge = document.getElementById('sync-status');
-    const statusText = document.getElementById('sync-status-text');
+    const statusBadge = document.getElementById("sync-status");
+    const statusText = document.getElementById("sync-status-text");
 
     try {
       let response = null;
 
-      // 1. 若已有驗證成功過的 Raw URL，直接請求
       if (verifiedRawUrl) {
-        response = await fetch(${verifiedRawUrl}?_t=${Date.now()}, { cache: 'no-store' });
+        response = await fetch(verifiedRawUrl + "?_t=" + Date.now(), { cache: "no-store" });
       } else {
-        // 2. 初次載入時測試候選 URL，自動鎖定能通的帳號路徑
-        for (const url of RAW_URL_CANDIDATES) {
+        for (let i = 0; i < RAW_URL_CANDIDATES.length; i++) {
+          const testUrl = RAW_URL_CANDIDATES[i];
           try {
-            const testRes = await fetch(${url}?_t=${Date.now()}, { cache: 'no-store' });
+            const testRes = await fetch(testUrl + "?_t=" + Date.now(), { cache: "no-store" });
             if (testRes.ok) {
-              verifiedRawUrl = url;
+              verifiedRawUrl = testUrl;
               response = testRes;
               break;
             }
-          } catch (_) {}
+          } catch (e) {
+            // 嘗試下一個候選網址
+          }
         }
       }
 
       if (!response || !response.ok) {
-        throw new Error(無法連線至 Raw CDN (HTTP ${response ? response.status : 'Timeout'}));
+        const statusCode = response ? response.status : "連線逾時";
+        throw new Error("HTTP " + statusCode);
       }
 
       const payload = await response.json();
       renderUI(payload);
 
-      statusBadge.className = 'status-badge';
-      statusText.textContent = '即時同步中 (Raw CDN)';
+      statusBadge.className = "status-badge";
+      statusText.textContent = "即時同步中 (Raw CDN)";
     } catch (err) {
-      console.error('更新失敗:', err);
-      statusBadge.className = 'status-badge error';
-      statusText.textContent = 同步失敗: ${err.message};
+      console.error("更新失敗:", err);
+      statusBadge.className = "status-badge error";
+      statusText.textContent = "同步失敗: " + err.message;
     }
   }
 
   function renderUI(data) {
     const timestamp = data.timestamp ? new Date(data.timestamp).toLocaleTimeString() : new Date().toLocaleTimeString();
-    document.getElementById('last-updated').textContent = timestamp;
+    document.getElementById("last-updated").textContent = timestamp;
 
     const kpi = data.kpi || {};
-    document.getElementById('kpi-threads').textContent = (kpi.activeThreadCount || 0).toLocaleString();
-    document.getElementById('kpi-queued').textContent = (kpi.flowFilesQueued || 0).toLocaleString();
-    document.getElementById('kpi-bytes-queued').textContent = formatBytes(kpi.bytesQueued);
-    document.getElementById('kpi-read').textContent = formatBytes(kpi.bytesRead);
-    document.getElementById('kpi-written').textContent = formatBytes(kpi.bytesWritten);
-    document.getElementById('kpi-errors').textContent = (kpi.errorCount || 0).toLocaleString();
-    document.getElementById('kpi-warnings').textContent = (kpi.warningCount || 0).toLocaleString();
-    document.getElementById('kpi-invalid').textContent = (kpi.invalidComponentCount || 0).toLocaleString();
+    document.getElementById("kpi-threads").textContent = (kpi.activeThreadCount || 0).toLocaleString();
+    document.getElementById("kpi-queued").textContent = (kpi.flowFilesQueued || 0).toLocaleString();
+    document.getElementById("kpi-bytes-queued").textContent = formatBytes(kpi.bytesQueued);
+    document.getElementById("kpi-read").textContent = formatBytes(kpi.bytesRead);
+    document.getElementById("kpi-written").textContent = formatBytes(kpi.bytesWritten);
+    document.getElementById("kpi-errors").textContent = (kpi.errorCount || 0).toLocaleString();
+    document.getElementById("kpi-warnings").textContent = (kpi.warningCount || 0).toLocaleString();
+    document.getElementById("kpi-invalid").textContent = (kpi.invalidComponentCount || 0).toLocaleString();
 
-    // 隊列積壓 (Bottlenecks)
-    const tbodyBottlenecks = document.getElementById('tbody-bottlenecks');
+    const tbodyBottlenecks = document.getElementById("tbody-bottlenecks");
     const bottlenecks = data.bottlenecks || [];
     if (bottlenecks.length === 0) {
       tbodyBottlenecks.innerHTML = '<tr><td colspan="6" class="empty-msg">目前沒有任何隊列積壓或背壓警戒</td></tr>';
     } else {
-      tbodyBottlenecks.innerHTML = bottlenecks.map(b => {
+      let bHtml = "";
+      for (let i = 0; i < bottlenecks.length; i++) {
+        const b = bottlenecks[i];
         const countPercent = b.percent_use_count || 0;
         const bytesPercent = b.percent_use_bytes || 0;
         const isHigh = countPercent >= 80 || bytesPercent >= 80;
-        return `
-          <tr>
-            <td><strong>${b.connection_name || '未命名'}</strong><br><small style="color: var(--text-muted);">${b.connection_id}</small></td>
-            <td>${b.source_name || b.source_id}</td>
-            <td>${b.destination_name || b.destination_id}</td>
-            <td><strong>${(b.queued_count || 0).toLocaleString()}</strong></td>
-            <td>${b.queued_size || '0 B'}</td>
-            <td>
-              <div>
-                <span class="progress-bar"><span class="progress-fill ${isHigh ? 'danger' : ''}" style="width: ${Math.min(countPercent, 100)}%;"></span></span>
-                ${countPercent}% (筆數)
-              </div>
-              <div style="margin-top: 4px;">
-                <span class="progress-bar"><span class="progress-fill ${isHigh ? 'danger' : ''}" style="width: ${Math.min(bytesPercent, 100)}%;"></span></span>
-                ${bytesPercent}% (容量)
-              </div>
-            </td>
-          </tr>
-        `;
-      }).join('');
+        const fillClass = isHigh ? "danger" : "";
+        bHtml += '<tr>' +
+          '<td><strong>' + (b.connection_name || "未命名") + '</strong><br><small style="color: var(--text-muted);">' + (b.connection_id || "") + '</small></td>' +
+          '<td>' + (b.source_name || b.source_id || "-") + '</td>' +
+          '<td>' + (b.destination_name || b.destination_id || "-") + '</td>' +
+          '<td><strong>' + (b.queued_count || 0).toLocaleString() + '</strong></td>' +
+          '<td>' + (b.queued_size || "0 B") + '</td>' +
+          '<td>' +
+            '<div><span class="progress-bar"><span class="progress-fill ' + fillClass + '" style="width: ' + Math.min(countPercent, 100) + '%;"></span></span>' + countPercent + '% (筆數)</div>' +
+            '<div style="margin-top: 4px;"><span class="progress-bar"><span class="progress-fill ' + fillClass + '" style="width: ' + Math.min(bytesPercent, 100) + '%;"></span></span>' + bytesPercent + '% (容量)</div>' +
+          '</td>' +
+        '</tr>';
+      }
+      tbodyBottlenecks.innerHTML = bHtml;
     }
 
-    // 異常處理器 (Invalid Processors)
-    const tbodyInvalid = document.getElementById('tbody-invalid');
+    const tbodyInvalid = document.getElementById("tbody-invalid");
     const invalidProcs = data.invalid_processors || [];
     if (invalidProcs.length === 0) {
       tbodyInvalid.innerHTML = '<tr><td colspan="4" class="empty-msg">所有 Processor 皆正常校驗通過</td></tr>';
     } else {
-      tbodyInvalid.innerHTML = invalidProcs.map(p => `
-        <tr>
-          <td><strong>${p.name || '未命名'}</strong><br><small style="color: var(--text-muted);">${p.processor_id}</small></td>
-          <td>${(p.type || '').split('.').pop()}</td>
-          <td><span class="badge badge-danger">${p.validation_status}</span></td>
-          <td><pre style="margin: 0; color: #fca5a5; white-space: pre-wrap; font-size: 12px;">${(p.validation_errors || []).join('\n')}</pre></td>
-        </tr>
-      `).join('');
+      let invHtml = "";
+      for (let i = 0; i < invalidProcs.length; i++) {
+        const p = invalidProcs[i];
+        const typeShort = (p.type || "").split(".").pop();
+        const errText = (p.validation_errors || []).join("\\n");
+        invHtml += '<tr>' +
+          '<td><strong>' + (p.name || "未命名") + '</strong><br><small style="color: var(--text-muted);">' + (p.processor_id || "") + '</small></td>' +
+          '<td>' + typeShort + '</td>' +
+          '<td><span class="badge badge-danger">' + (p.validation_status || "INVALID") + '</span></td>' +
+          '<td><pre style="margin: 0; color: #fca5a5; white-space: pre-wrap; font-size: 12px;">' + errText + '</pre></td>' +
+        '</tr>';
+      }
+      tbodyInvalid.innerHTML = invHtml;
     }
 
-    // Bulletins 看板
-    const bulletinsContainer = document.getElementById('bulletins-container');
+    const bulletinsContainer = document.getElementById("bulletins-container");
     const bulletins = data.bulletins || [];
     if (bulletins.length === 0) {
       bulletinsContainer.innerHTML = '<div class="empty-msg">無任何警示或錯誤訊息</div>';
     } else {
-      bulletinsContainer.innerHTML = bulletins.slice(-10).reverse().map(b => {
-        const item = b.bulletin || {};
-        const level = (item.level || 'INFO').toUpperCase();
-        const badgeClass = level === 'ERROR' ? 'badge-danger' : level === 'WARNING' ? 'badge-warning' : 'badge-info';
-        return `
-          <div class="bulletin-item">
-            <span class="badge ${badgeClass}">${level}</span>
-            <div class="bulletin-msg">
-              <strong>[${item.sourceName || '系統'}]</strong> ${item.message}
-              <div style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">${item.timestamp || ''}</div>
-            </div>
-          </div>
-        `;
-      }).join('');
+      let bullHtml = "";
+      const recent = bulletins.slice(-10).reverse();
+      for (let i = 0; i < recent.length; i++) {
+        const item = recent[i].bulletin || {};
+        const level = (item.level || "INFO").toUpperCase();
+        let badgeClass = "badge-info";
+        if (level === "ERROR") badgeClass = "badge-danger";
+        else if (level === "WARNING") badgeClass = "badge-warning";
+
+        bullHtml += '<div class="bulletin-item">' +
+          '<span class="badge ' + badgeClass + '">' + level + '</span>' +
+          '<div class="bulletin-msg">' +
+            '<strong>[' + (item.sourceName || "系統") + ']</strong> ' + (item.message || "") +
+            '<div style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">' + (item.timestamp || "") + '</div>' +
+          '</div>' +
+        '</div>';
+      }
+      bulletinsContainer.innerHTML = bullHtml;
     }
   }
 
   function resetPolling() {
     if (timerId) clearInterval(timerId);
-    const interval = parseInt(document.getElementById('cfg-interval').value, 10);
+    const intervalSelect = document.getElementById("cfg-interval");
+    const interval = parseInt(intervalSelect ? intervalSelect.value : 5000, 10);
     fetchLatestData();
     timerId = setInterval(fetchLatestData, interval);
   }
 
-  document.getElementById('btn-manual-sync').addEventListener('click', fetchLatestData);
-  document.getElementById('cfg-interval').addEventListener('change', resetPolling);
+  document.getElementById("btn-manual-sync").addEventListener("click", fetchLatestData);
+  document.getElementById("cfg-interval").addEventListener("change", resetPolling);
 
-  // 初始化啟動
   resetPolling();
 </script>
 </body>
