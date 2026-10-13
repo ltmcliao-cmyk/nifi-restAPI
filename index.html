@@ -1,62 +1,68 @@
 <!DOCTYPE html>
 <html lang="zh-Hant">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>NiFi 監控儀表板</title>
   <style>
     :root {
       --bg-color: #0f172a;
       --card-bg: #1e293b;
       --text-main: #f8fafc;
-      --text-muted: #94a3b8;
-      --accent: #38bdf8;
-      --warn: #f59e0b;
-      --danger: #ef4444;
-      --success: #10b981;
-      --border: #334155;
+      --text-sub: #94a3b8;
+      --border-color: #334155;
+      --online: #10b981;
+      --offline: #ef4444;
+      --warning: #f59e0b;
+      --accent: #3b82f6;
     }
 
     * {
       box-sizing: border-box;
       margin: 0;
       padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     }
 
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
       background-color: var(--bg-color);
       color: var(--text-main);
       padding: 24px;
-      line-height: 1.5;
     }
 
-    header {
+    .header {
       display: flex;
       justify-content: space-between;
       align-items: center;
       margin-bottom: 24px;
       padding-bottom: 16px;
-      border-bottom: 1px solid var(--border);
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    .header h1 {
+      font-size: 1.5rem;
+      font-weight: 600;
     }
 
     .status-badge {
-      font-size: 0.9rem;
-      padding: 6px 14px;
+      display: inline-flex;
+      align-items: center;
+      padding: 6px 12px;
       border-radius: 9999px;
-      background: #334155;
+      font-size: 0.875rem;
+      font-weight: 500;
+      background-color: var(--card-bg);
+      border: 1px solid var(--border-color);
     }
 
     .status-online {
-      background-color: rgba(16, 185, 129, 0.2);
-      color: var(--success);
-      border: 1px solid var(--success);
+      color: var(--online);
+      border-color: rgba(16, 185, 129, 0.4);
     }
 
     .status-offline {
-      background-color: rgba(239, 68, 68, 0.2);
-      color: var(--danger);
-      border: 1px solid var(--danger);
+      color: var(--offline);
+      border-color: rgba(239, 68, 68, 0.4);
     }
 
     .kpi-grid {
@@ -67,113 +73,92 @@
     }
 
     .kpi-card {
-      background: var(--card-bg);
-      border: 1px solid var(--border);
+      background-color: var(--card-bg);
+      border: 1px solid var(--border-color);
       border-radius: 8px;
-      padding: 16px;
+      padding: 20px;
     }
 
     .kpi-title {
-      font-size: 0.85rem;
-      color: var(--text-muted);
+      font-size: 0.875rem;
+      color: var(--text-sub);
       margin-bottom: 8px;
     }
 
     .kpi-value {
       font-size: 1.75rem;
       font-weight: 700;
+      color: var(--text-main);
     }
 
     .section-card {
-      background: var(--card-bg);
-      border: 1px solid var(--border);
+      background-color: var(--card-bg);
+      border: 1px solid var(--border-color);
       border-radius: 8px;
       padding: 20px;
       margin-bottom: 24px;
     }
 
     .section-card h2 {
-      font-size: 1.2rem;
+      font-size: 1.125rem;
       margin-bottom: 16px;
-      color: var(--accent);
-    }
-
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      text-align: left;
-      font-size: 0.9rem;
-    }
-
-    th, td {
-      padding: 12px;
-      border-bottom: 1px solid var(--border);
-    }
-
-    th {
-      color: var(--text-muted);
-      font-weight: 600;
-      background-color: rgba(0, 0, 0, 0.2);
-    }
-
-    .badge {
-      display: inline-block;
-      padding: 2px 8px;
-      border-radius: 4px;
-      font-size: 0.8rem;
-      font-weight: 600;
-    }
-
-    .badge-warn {
-      background-color: rgba(245, 158, 11, 0.2);
-      color: var(--warn);
-    }
-
-    .badge-danger {
-      background-color: rgba(239, 68, 68, 0.2);
-      color: var(--danger);
+      color: var(--text-main);
     }
 
     .empty-msg {
-      color: var(--text-muted);
-      text-align: center;
-      padding: 24px 0;
-      font-size: 0.95rem;
+      color: var(--text-sub);
+      font-size: 0.875rem;
+    }
+
+    .item-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .list-item {
+      padding: 12px;
+      background-color: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.875rem;
+    }
+
+    .item-error {
+      color: var(--offline);
+      font-size: 0.75rem;
+      margin-top: 4px;
     }
   </style>
 </head>
 <body>
 
-  <header>
-    <h1>NiFi 監控儀表板</h1>
-    <div id="connectionStatus" class="status-badge status-offline">連線檢查中...</div>
+  <!-- 頂部標題與連線狀態 -->
+  <header class="header">
+    <h1>NiFi 流程即時監控</h1>
+    <span id="connectionStatus" class="status-badge status-offline">連線中...</span>
   </header>
 
-  <!-- KPI 指標區塊 -->
+  <!-- KPI 摘要數據 -->
   <section class="kpi-grid">
     <div class="kpi-card">
       <div class="kpi-title">總連線數 (Connections)</div>
-      <div id="kpiConnections" class="kpi-value">-</div>
+      <div class="kpi-value" id="kpiConnections">-</div>
     </div>
     <div class="kpi-card">
-      <div class="kpi-title">目前堆積量 (Queued FlowFiles)</div>
-      <div id="kpiQueuedCount" class="kpi-value">-</div>
+      <div class="kpi-title">佇列 FlowFiles (Queued)</div>
+      <div class="kpi-value" id="kpiQueued">-</div>
     </div>
     <div class="kpi-card">
-      <div class="kpi-title">堵塞連線數 (Bottlenecks)</div>
-      <div id="kpiBottlenecks" class="kpi-value">-</div>
+      <div class="kpi-title">執行中處理器 (Running)</div>
+      <div class="kpi-value" id="kpiRunning">-</div>
     </div>
     <div class="kpi-card">
-      <div class="kpi-title">無效元件數 (Invalid Processors)</div>
-      <div id="kpiInvalidProcessors" class="kpi-value">-</div>
-    </div>
-  </section>
-
-  <!-- 瓶頸連線清單 -->
-  <section class="section-card">
-    <h2>佇列背壓 / 堵塞連線清單</h2>
-    <div id="bottleneckContainer">
-      <p class="empty-msg">載入中...</p>
+      <div class="kpi-title">已停止處理器 (Stopped)</div>
+      <div class="kpi-value" id="kpiStopped">-</div>
     </div>
   </section>
 
@@ -187,12 +172,13 @@
 
   <script>
     // 指向 Firebase Realtime Database REST 端點
-    const FIREBASE_URL = "https://nifi-d2de1-default-rtdb.firebaseio.com/nifi_monitor.json"; 
+    const FIREBASE_URL = "https://nifi-d2de1-default-rtdb.firebaseio.com/nifi_monitor.json";
 
     function setConnectionStatus(isOnline, message) {
       const el = document.getElementById("connectionStatus");
       if (!el) return;
-      el.className = status-badge ${isOnline ? "status-online" : "status-offline"};
+      // 修復字串模板缺失反引號問題
+      el.className = `status-badge ${isOnline ? "status-online" : "status-offline"}`;
       el.textContent = message;
     }
 
@@ -201,7 +187,7 @@
 
       // 1. KPI 欄位映射與容錯計算
       const kpi = data.kpi || {};
-      
+
       // 計算所有 Process Group 的連線總數
       let totalConnections = data.total_connections;
       if (totalConnections === undefined && Array.isArray(data.process_groups_summary)) {
@@ -209,100 +195,48 @@
       }
       document.getElementById("kpiConnections").textContent = totalConnections ?? "-";
 
-      // 佇列數量（優先取 kpi.flowFilesQueued）
-      const queuedCount = kpi.flowFilesQueued ?? data.total_queued_count ?? 0;
-      document.getElementById("kpiQueuedCount").textContent = Number(queuedCount).toLocaleString();
+      // 佇列數量 (優先取 kpi.flowFilesQueued)
+      const queuedCount = kpi.flowFilesQueued ?? data.queued_count ?? 0;
+      document.getElementById("kpiQueued").textContent = Number(queuedCount).toLocaleString();
 
-      // 瓶頸與異常元件計數
-      const bottlenecks = data.bottlenecks || [];
-      const invalidProcessors = data.invalid_processors || [];
-      document.getElementById("kpiBottlenecks").textContent = bottlenecks.length;
-      document.getElementById("kpiInvalidProcessors").textContent = invalidProcessors.length;
+      // 運行狀態計算
+      document.getElementById("kpiRunning").textContent = kpi.runningCount ?? data.running_count ?? "-";
+      document.getElementById("kpiStopped").textContent = kpi.stoppedCount ?? data.stopped_count ?? "-";
 
-      // 2. 渲染 Bottlenecks 表格
-      const bContainer = document.getElementById("bottleneckContainer");
-      if (bottlenecks.length > 0) {
-        let html = `<table>
-          <thead>
-            <tr>
-              <th>連線名稱 / ID</th>
-              <th>來源元件</th>
-              <th>目標元件</th>
-              <th>積壓數量</th>
-              <th>積壓體積</th>
-              <th>背壓使用率 (數量/容量)</th>
-            </tr>
-          </thead>
-          <tbody>`;
+      // 2. 渲染無效處理器清單
+      const invalidContainer = document.getElementById("invalidContainer");
+      const invalidList = data.invalid_processors || [];
 
-        bottlenecks.forEach(b => {
-          html += `<tr>
-            <td><strong>${b.connection_name || b.connection_id}</strong></td>
-            <td>${b.source_name || "-"}</td>
-            <td>${b.destination_name || "-"}</td>
-            <td><span class="badge badge-warn">${b.queued_count}</span></td>
-            <td>${b.queued_size || "-"}</td>
-            <td>${b.percent_use_count}% / ${b.percent_use_bytes}%</td>
-          </tr>`;
-        });
-
-        html += </tbody></table>;
-        bContainer.innerHTML = html;
+      if (!Array.isArray(invalidList) || invalidList.length === 0) {
+        invalidContainer.innerHTML = '<p class="empty-msg">目前無任何異常或無效處理器。</p>';
       } else {
-        bContainer.innerHTML = <p class="empty-msg">佇列正常，無背壓或堵塞連線</p>;
-      }
-
-      // 3. 渲染 Invalid Processors 表格
-      const pContainer = document.getElementById("invalidContainer");
-      if (invalidProcessors.length > 0) {
-        let html = `<table>
-          <thead>
-            <tr>
-              <th>Processor 名稱</th>
-              <th>類型</th>
-              <th>狀態</th>
-              <th>驗證錯誤內容</th>
-            </tr>
-          </thead>
-          <tbody>`;
-
-        invalidProcessors.forEach(p => {
-          const errors = Array.isArray(p.validation_errors) 
-            ? p.validation_errors.join("<br>") 
-            : (p.validation_errors || "-");
-
-          html += `<tr>
-            <td><strong>${p.name || p.id}</strong></td>
-            <td>${p.type || "-"}</td>
-            <td><span class="badge badge-danger">${p.state || "INVALID"}</span></td>
-            <td style="color: #fca5a5; font-size: 0.85rem;">${errors}</td>
-          </tr>`;
-        });
-
-        html += </tbody></table>;
-        pContainer.innerHTML = html;
-      } else {
-        pContainer.innerHTML = <p class="empty-msg">所有 Processor 皆正常運行，無驗證錯誤</p>;
+        invalidContainer.innerHTML = `
+          <div class="item-list">
+            ${invalidList.map(proc => `
+              <div class="list-item">
+                <div>
+                  <strong>${proc.name || proc.id || "未命名元件"}</strong>
+                  <div class="item-error">${proc.validation_errors?.join("； ") || "配置無效"}</div>
+                </div>
+                <span style="color: var(--offline); font-size: 0.75rem;">無效</span>
+              </div>
+            `).join("")}
+          </div>
+        `;
       }
     }
 
     async function refreshMonitor() {
       try {
-        const res = await fetch(FIREBASE_URL);
-        if (!res.ok) {
-          throw new Error("HTTP 錯誤: " + res.status);
+        const response = await fetch(FIREBASE_URL);
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
         }
-
-        const data = await res.json();
-
-        if (!data) {
-          setConnectionStatus(false, "資料庫目前無資料 (請啟動 Python 推送)");
-          return;
-        }
-
+        const data = await response.json();
         renderDashboard(data);
-        const updateTime = data.timestamp 
-          ? new Date(data.timestamp).toLocaleTimeString() 
+
+        const updateTime = data?.timestamp
+          ? new Date(data.timestamp).toLocaleTimeString()
           : new Date().toLocaleTimeString();
 
         setConnectionStatus(true, "最後同步: " + updateTime);
@@ -312,7 +246,7 @@
       }
     }
 
-    // 每 3 秒輪詢更新
+    // 每 3 秒輪詢更新一次
     setInterval(refreshMonitor, 3000);
     refreshMonitor();
   </script>
