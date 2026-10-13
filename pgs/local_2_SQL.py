@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-pgs/local_2_SQL.py - Local_2_SQL 完整流程圖模組 (解決 Controller Service 400 錯誤)
+pgs/local_2_SQL.py - Local_2_SQL 完整流程圖模組 (徹底解決 Controller Service 400 錯誤)
 """
 import os
 import sys
@@ -164,7 +164,10 @@ def configure_processor_clean(proc, desired_properties, auto_terminated_rels=Non
 
 
 def ensure_local_controller_service(local_pg, service_type, service_name, properties=None):
-    """建立或確認 Controller Service 狀態（安全處理已 ENABLED 狀態下的更新）"""
+    """
+    建立或確認 Controller Service 狀態。
+    若需修改屬性，確保無痛處理 DISABLE -> UPDATE -> ENABLE 流程，防範 400 錯誤。
+    """
     log(f"檢查 Controller Service: '{service_name}'", "STEP")
     services = nipyapi.canvas.list_all_controllers(local_pg.id)
     svc = next((s for s in services if s.component.name == service_name), None)
@@ -184,19 +187,23 @@ def ensure_local_controller_service(local_pg, service_type, service_name, proper
     if isinstance(svc, list):
         svc = svc[0]
 
-    # 若屬性需要更新，且服務目前為 ENABLED 狀態，必須先將其 DISABLE
+    # 檢查屬性是否完全一致，若不同才進行更新
     if properties:
         current_props = svc.component.properties or {}
-        # 檢查是否有任何屬性不同
-        needs_update = any(current_props.get(k) != v for k, v in properties.items())
+        needs_update = False
+        for k, v in properties.items():
+            if current_props.get(k) != v:
+                needs_update = True
+                break
 
         if needs_update:
-            if svc.component.state == "ENABLED":
-                log(f"Controller Service 已啟用且屬性需更新，先停用服務...", "STEP")
+            log(f"Controller Service 屬性變更，執行安全停用與更新...", "STEP")
+            # 1. 若目前為 ENABLED，必須先停用 (Disable)
+            if svc.component.state != "DISABLED":
                 try:
                     nipyapi.canvas.schedule_controller(svc, scheduled=False)
                 except Exception as e:
-                    log(f"停用提示: {parse_api_exception(e)}", "WARN")
+                    log(f"停用發送提示: {parse_api_exception(e)}", "WARN")
 
                 for _ in range(15):
                     time.sleep(0.5)
@@ -204,61 +211,60 @@ def ensure_local_controller_service(local_pg, service_type, service_name, proper
                     if isinstance(svc, list):
                         svc = svc[0]
                     if svc.component.state == "DISABLED":
+                        log(f"Controller Service 已成功轉為 DISABLED", "OK")
                         break
 
-            log(f"更新 Controller Service 屬性...", "INFO")
-            svc.component.properties = properties
-            nipyapi.canvas.update_controller(svc, svc.component)
+            # 2. 更新 Controller Service 配置
+            try:
+                svc.component.properties = properties
+                nipyapi.canvas.update_controller(svc, svc.component)
+                log(f"Controller Service 配置更新成功！", "OK")
+            except Exception as e:
+                log(f"更新配置提示: {parse_api_exception(e)}", "WARN")
 
-    if svc.component.state == "ENABLED":
-        log(f"Controller Service 已處於 ENABLED 狀態，直接沿用。", "OK")
-        return svc
+    # 3. 若服務為 DISABLED，發送啟用命令 (Enable)
+    svc = nipyapi.canvas.get_controller(svc.id, identifier_type="id")
+    if isinstance(svc, list):
+        svc = svc[0]
 
-    log(f"發送啟用命令至 {service_name}...", "STEP")
-    try:
-        nipyapi.canvas.schedule_controller(svc, scheduled=True)
-    except Exception as e:
-        log(f"啟用調度提示: {parse_api_exception(e)}", "WARN")
+    if svc.component.state != "ENABLED":
+        log(f"發送啟用命令至 {service_name}...", "STEP")
+        try:
+            nipyapi.canvas.schedule_controller(svc, scheduled=True)
+        except Exception as e:
+            log(f"啟用調度提示: {parse_api_exception(e)}", "WARN")
 
-    for _ in range(20):
-        time.sleep(0.5)
-        svc = nipyapi.canvas.get_controller(svc.id, identifier_type="id")
-        if isinstance(svc, list):
-            svc = svc[0]
-        if svc.component.state == "ENABLED":
-            log(f"Controller Service '{service_name}' 已成功轉為 ENABLED！", "OK")
-            break
+        for _ in range(20):
+            time.sleep(0.5)
+            svc = nipyapi.canvas.get_controller(svc.id, identifier_type="id")
+            if isinstance(svc, list):
+                svc = svc[0]
+            if svc.component.state == "ENABLED":
+                log(f"Controller Service '{service_name}' 已成功轉為 ENABLED！", "OK")
+                break
+
     return svc
 
 
 def setup_local_2_sql_pipeline(local_pg, dbcp_svc, input_dir=DEFAULT_RAW_DIR, table_name="raw_bike_availability"):
     """
-    建立完整的 6-Processor Pipeline:
-    1. List Local Raw Files (ListFile)
-    2. Fetch Raw Content (Read Only) (FetchFile)
-    3. Route Table Type (RouteOnAttribute)
-    4. Wrap SQL Header (Prepend) (ReplaceText)
-    5. Wrap SQL Footer (Append) (ReplaceText)
-    6. PutSQL to PostgreSQL RAW (PutSQL)
+    建立完整的 6-Processor Pipeline
     """
     log("開始部署 Local_2_SQL 完整 Pipeline...", "STEP")
 
     procs = nipyapi.canvas.list_all_processors(local_pg.id)
     proc_map = {p.component.name: p for p in procs}
 
-    # 1. 停止所有現有處理器
-    log("停止所有 Process Group 內部的處理器...", "STEP")
-    for p in procs:
-        stop_processor_safely(p)
-
-    # 2. 清空並清理舊連線
+    # 1. 清空舊連線
     conns = nipyapi.canvas.list_all_connections(local_pg.id)
     for c in conns:
         safe_purge_and_delete_connection(c)
 
     base_x, base_y = 100, 100
 
+    # -------------------------------------------------------------
     # 1. List Local Raw Files (ListFile)
+    # -------------------------------------------------------------
     list_proc = proc_map.get(LIST_PROC_NAME)
     if not list_proc:
         log("建立 ListFile 處理器...", "STEP")
@@ -284,7 +290,9 @@ def setup_local_2_sql_pipeline(local_pg, dbcp_svc, input_dir=DEFAULT_RAW_DIR, ta
     })
     log(f"ListFile 配置完成 (UUID: {list_proc.id})", "OK")
 
+    # -------------------------------------------------------------
     # 2. Fetch Raw Content (FetchFile)
+    # -------------------------------------------------------------
     fetch_proc = proc_map.get(FETCH_PROC_NAME)
     if not fetch_proc:
         log("建立 FetchFile 處理器...", "STEP")
@@ -305,7 +313,9 @@ def setup_local_2_sql_pipeline(local_pg, dbcp_svc, input_dir=DEFAULT_RAW_DIR, ta
     )
     log(f"FetchFile 配置完成 (UUID: {fetch_proc.id})", "OK")
 
+    # -------------------------------------------------------------
     # 3. Route Table Type (RouteOnAttribute)
+    # -------------------------------------------------------------
     route_proc = proc_map.get(ROUTE_PROC_NAME)
     if not route_proc:
         log("建立 RouteOnAttribute 處理器...", "STEP")
@@ -326,7 +336,9 @@ def setup_local_2_sql_pipeline(local_pg, dbcp_svc, input_dir=DEFAULT_RAW_DIR, ta
     )
     log(f"RouteOnAttribute 配置完成 (UUID: {route_proc.id})", "OK")
 
+    # -------------------------------------------------------------
     # 4. Wrap SQL Header (Prepend - ReplaceText)
+    # -------------------------------------------------------------
     prepend_proc = proc_map.get(PREPEND_PROC_NAME)
     if not prepend_proc:
         log("建立 Prepend 處理器...", "STEP")
@@ -348,7 +360,9 @@ def setup_local_2_sql_pipeline(local_pg, dbcp_svc, input_dir=DEFAULT_RAW_DIR, ta
     )
     log(f"Prepend 配置完成 (UUID: {prepend_proc.id})", "OK")
 
+    # -------------------------------------------------------------
     # 5. Wrap SQL Footer (Append - ReplaceText)
+    # -------------------------------------------------------------
     append_proc = proc_map.get(APPEND_PROC_NAME)
     if not append_proc:
         log("建立 Append 處理器...", "STEP")
@@ -370,7 +384,9 @@ def setup_local_2_sql_pipeline(local_pg, dbcp_svc, input_dir=DEFAULT_RAW_DIR, ta
     )
     log(f"Append 配置完成 (UUID: {append_proc.id})", "OK")
 
+    # -------------------------------------------------------------
     # 6. PutSQL to PostgreSQL RAW (PutSQL)
+    # -------------------------------------------------------------
     putsql_proc = proc_map.get(PUT_SQL_PROC_NAME)
     if not putsql_proc:
         log("建立 PutSQL 處理器...", "STEP")
@@ -393,7 +409,7 @@ def setup_local_2_sql_pipeline(local_pg, dbcp_svc, input_dir=DEFAULT_RAW_DIR, ta
     )
     log(f"PutSQL 配置完成 (UUID: {putsql_proc.id})", "OK")
 
-    # 建置 Pipeline 流向連線
+    # 建立 5 條管道連線
     log("建置完整 Pipeline 流向連線...", "STEP")
 
     nipyapi.canvas.create_connection(
@@ -470,7 +486,7 @@ def dump_process_group_health(local_pg):
 
 
 def create_local_2_sql_pg(parent_pg=None, *args, **kwargs):
-    """進入點函式"""
+    """主進入點"""
     log("==========================================", "STEP")
     log("=== [START] Local_2_SQL 完整部署 ===", "STEP")
     log("==========================================", "STEP")
@@ -487,7 +503,13 @@ def create_local_2_sql_pg(parent_pg=None, *args, **kwargs):
 
         log(f"鎖定 Process Group: {local_pg.component.name} (UUID: {local_pg.id})", "OK")
 
-        # 1. 配置 DBCP Controller Service
+        # 1. 停止所有現有 Processors，避免占用 Controller Service 導致無法修改
+        procs = nipyapi.canvas.list_all_processors(local_pg.id)
+        log("首先停止 PG 內所有 Processor，釋放 Controller Service 鎖定...", "STEP")
+        for p in procs:
+            stop_processor_safely(p)
+
+        # 2. 安全配置/更新 DBCP Controller Service
         db_config = kwargs.get("db_config", DEFAULT_DB_CONFIG)
         dbcp_properties = {
             "Database Connection URL": db_config["url"],
@@ -503,12 +525,12 @@ def create_local_2_sql_pg(parent_pg=None, *args, **kwargs):
             properties=dbcp_properties,
         )
 
-        # 2. 部署 6 節點完整管道
+        # 3. 部署 6 節點完整管道
         input_dir = kwargs.get("input_dir", DEFAULT_RAW_DIR)
         table_name = kwargs.get("table_name", "raw_bike_availability")
         setup_local_2_sql_pipeline(local_pg, dbcp_svc, input_dir=input_dir, table_name=table_name)
 
-        # 3. 輸出健康檢查
+        # 4. 輸出健康檢查
         dump_process_group_health(local_pg)
 
         log("==========================================", "OK")
