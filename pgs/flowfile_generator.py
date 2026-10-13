@@ -25,7 +25,7 @@ def create_flowfile_generator_pg(parent_pg=None, **kwargs):
         log(f"建立新的 Process Group: {GENERATOR_PG_NAME}", "INFO")
         gen_pg = nipyapi.canvas.create_process_group(
             parent_pg=parent_pg,
-            name=GENERATOR_PG_NAME,
+            new_pg_name=GENERATOR_PG_NAME,
             location=(300, 300)
         )
     log(f"鎖定目標 Process Group: {gen_pg.component.name} (UUID: {gen_pg.id})", "OK")
