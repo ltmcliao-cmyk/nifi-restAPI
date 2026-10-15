@@ -46,7 +46,7 @@ def create_flowfile_generator_pg(parent_pg=None, **kwargs):
     nipyapi.canvas.update_processor(
         sink,
         nipyapi.nifi.ProcessorConfigDTO(
-            scheduling_period="0 sec",  # 慢速消化，確保 Queue 保持積壓又一直在動
+            scheduling_period="1 sec",  # 慢速消化，確保 Queue 保持積壓又一直在動
             auto_terminated_relationships=["success"],
         ),
     )
